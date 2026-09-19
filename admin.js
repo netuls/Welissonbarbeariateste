@@ -152,6 +152,7 @@ function initAdmin() {
   const el = document.getElementById('admin-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   loadAgendamentos();
+  carregarPrecosServicos();
   verificarAniversariosGlobal();
   verificarPlanosGlobal();
   carregarClientesFirestore().then(() => { try { renderDashboard(); } catch (e) {} });
@@ -159,6 +160,85 @@ function initAdmin() {
   if ('Notification' in window && Notification.permission === 'granted') iniciarPushNotifications();
   atualizarBotaoPush();
   renderNotifPanel(); // inicia painel vazio
+}
+
+// ── Valores dos serviços ─────────────────────────
+// Guardados em config/servicos (o site lê o mesmo documento):
+//   precos: { corte: 30, barba: 20, ... }   lista: [{ id, name, price }]
+const PRECOS_PADRAO = {};
+SERVICES.forEach(s => { PRECOS_PADRAO[s.id] = s.price; });
+
+function fmtPrecoServ(v) { return 'R$' + Number(v).toFixed(2).replace('.', ','); }
+
+async function carregarPrecosServicos() {
+  try {
+    const doc = await db.collection('config').doc('servicos').get();
+    if (doc.exists) {
+      const precos = (doc.data() || {}).precos || {};
+      SERVICES.forEach(s => {
+        const v = Number(precos[s.id]);
+        if (precos[s.id] != null && !isNaN(v) && v >= 0) s.price = v;
+      });
+    }
+  } catch (e) { console.warn('Não foi possível carregar os preços dos serviços', e); }
+  if (document.getElementById('tab-servicos') && document.getElementById('tab-servicos').classList.contains('active')) renderServicosEditor();
+}
+
+function renderServicosEditor() {
+  const el = document.getElementById('servicos-lista');
+  if (!el) return;
+  el.innerHTML = SERVICES.map(s => {
+    const mudou = Math.abs(s.price - PRECOS_PADRAO[s.id]) > 0.004;
+    return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
+      '<div style="flex:1;min-width:160px;">' +
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;letter-spacing:.5px;color:#F1EAD6;">' + escPlano(s.name) + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#5E6E9E;">Valor padrão: ' + fmtPrecoServ(PRECOS_PADRAO[s.id]) + (mudou ? ' · <span style="color:#EBC531;">alterado</span>' : '') + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">R$</span>' +
+        '<input type="number" min="0" step="0.5" data-serv="' + escPlano(s.id) + '" value="' + s.price.toFixed(2) + '" ' +
+          'style="width:100px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+      '</div></div>';
+  }).join('');
+  document.getElementById('servicos-status').textContent = '';
+}
+
+function restaurarPrecosPadrao() {
+  document.querySelectorAll('#servicos-lista input[data-serv]').forEach(inp => {
+    inp.value = Number(PRECOS_PADRAO[inp.dataset.serv]).toFixed(2);
+  });
+  const st = document.getElementById('servicos-status');
+  st.style.color = '#94A4CC';
+  st.textContent = 'Valores padrão preenchidos. Clique em Salvar para aplicar.';
+}
+
+async function salvarServicos() {
+  const st = document.getElementById('servicos-status');
+  const btn = document.getElementById('btn-salvar-servicos');
+  const novos = {};
+  let invalido = false;
+  document.querySelectorAll('#servicos-lista input[data-serv]').forEach(inp => {
+    const v = Number(String(inp.value).replace(',', '.'));
+    if (inp.value === '' || isNaN(v) || v < 0) { invalido = true; inp.style.borderColor = '#e05555'; }
+    else { inp.style.borderColor = '#233F80'; novos[inp.dataset.serv] = Math.round(v * 100) / 100; }
+  });
+  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Há valores inválidos. Use números maiores ou iguais a zero.'; return; }
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    const lista = SERVICES.map(s => ({ id: s.id, name: s.name, price: novos[s.id] != null ? novos[s.id] : s.price }));
+    await db.collection('config').doc('servicos').set({
+      precos: novos,
+      lista,
+      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    SERVICES.forEach(s => { if (novos[s.id] != null) s.price = novos[s.id]; });
+    renderServicosEditor();
+    st.style.color = '#4caf50'; st.textContent = 'Valores salvos! Já valem para novos agendamentos.';
+    showToast('Valores dos serviços atualizados.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
 }
 
 // ── Tabs ─────────────────────────────────────────
@@ -173,9 +253,10 @@ function showTab(tab, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
   if (el) el.classList.add('active');
-  const titles = { dashboard: 'Dashboard', agendamentos: 'Agendamentos', horarios: 'Horarios de Atendimento', datas: 'Datas Especiais', clientes: 'Clientes' };
+  const titles = { dashboard: 'Dashboard', agendamentos: 'Agendamentos', horarios: 'Horarios de Atendimento', servicos: 'Valores dos Serviços', datas: 'Datas Especiais', clientes: 'Clientes' };
   document.getElementById('page-title').textContent = titles[tab] || tab;
   if (tab === 'horarios') carregarHorarios();
+  if (tab === 'servicos') renderServicosEditor();
   if (tab === 'datas') carregarDatasEspeciais();
   if (tab === 'clientes') renderClientes();
   gerenciarFab(tab);
@@ -2559,7 +2640,8 @@ async function abrirModalAvulso() {
 
   // Preenche o select de serviços
   const sel = document.getElementById('avulso-servico');
-  if (sel.options.length <= 1) {
+  {
+    while (sel.options.length > 1) sel.remove(1);   // recria com os preços atuais
     SERVICES.forEach(s => {
       const opt = document.createElement('option');
       opt.value = s.id;
@@ -2779,4 +2861,3 @@ document.addEventListener('click', function unlockOnce() {
   document.removeEventListener('click', unlockOnce);
   iniciarPushNotifications();
 });
-  
