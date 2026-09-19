@@ -29,6 +29,47 @@ const SERVICES = [
   { id: 'platinado_corte',   name: 'Platinado + Corte',            price: 110, duracao: 60 },
 ];
 
+
+// ─── Preços editáveis pelo painel admin ────────────
+// O painel grava os valores em config/servicos ({ precos: { corte: 30, ... } }).
+// O último valor conhecido fica guardado no aparelho, para a primeira tela já sair com o preço certo;
+// em seguida buscamos o valor atual no Firebase e atualizamos a tela se mudou.
+const PRECOS_CACHE_KEY = 'wb_precos_servicos_v1';
+
+// Aplica { id: preço } sobre SERVICES. Retorna true se algum preço mudou.
+function aplicarPrecosServicos(precos) {
+  let mudou = false;
+  if (!precos || typeof precos !== 'object') return mudou;
+  SERVICES.forEach(sv => {
+    const v = Number(precos[sv.id]);
+    if (precos[sv.id] != null && !isNaN(v) && v >= 0 && v !== sv.price) { sv.price = v; mudou = true; }
+  });
+  return mudou;
+}
+try {
+  aplicarPrecosServicos(JSON.parse(localStorage.getItem(PRECOS_CACHE_KEY) || 'null'));
+} catch (e) { /* sem cache: segue com os preços padrão */ }
+
+async function carregarPrecosServicos() {
+  try {
+    const doc = await firebase.firestore().collection('config').doc('servicos').get();
+    if (!doc.exists) return;
+    const precos = (doc.data() || {}).precos || {};
+    const mudou = aplicarPrecosServicos(precos);
+    try { localStorage.setItem(PRECOS_CACHE_KEY, JSON.stringify(precos)); } catch (e) {}
+    if (!mudou) return;
+    renderServices();
+    renderServiceOptions();
+    // mantém a seleção e o resumo coerentes com o novo preço
+    if (typeof state !== 'undefined' && state.selected) {
+      const item = document.getElementById('opt-' + state.selected.id);
+      if (item) item.classList.add('selected');
+      const passo3 = document.getElementById('step-3');
+      if (passo3 && passo3.classList.contains('active')) renderConfirm();
+    }
+  } catch (e) { console.warn('Preços dos serviços: usando os últimos valores conhecidos.', e); }
+}
+
 // ─── Duração dos serviços (em minutos) ────────────
 const DURACAO_PADRAO = 30;
 // Serviços antigos que podem existir em agendamentos já gravados
@@ -1004,6 +1045,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderServices();
   renderPlans();
   renderServiceOptions();
+  carregarPrecosServicos(); // atualiza os preços com o que foi salvo no painel admin
   initSlideshow(); // seguro: retorna cedo se não houver slider no HTML
 
   // Sessão
