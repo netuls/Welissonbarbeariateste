@@ -741,9 +741,9 @@
   <div id="confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
     <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:36px 32px;max-width:380px;width:90%;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
       
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Confirmar Agendamento</h3>
+      <h3 id="confirm-modal-titulo" style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Confirmar Agendamento</h3>
       <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#94A4CC;line-height:1.6;margin-bottom:28px;">
-        Deseja enviar a mensagem de confirmação para <strong id="confirm-modal-nome" style="color:#F1EAD6;"></strong> pelo WhatsApp?
+        Deseja enviar a mensagem <span id="confirm-modal-tipo">de confirmação</span> para <strong id="confirm-modal-nome" style="color:#F1EAD6;"></strong> pelo WhatsApp?
       </p>
       <div style="display:flex;gap:12px;justify-content:center;">
         <button id="confirm-modal-nao"
@@ -1304,20 +1304,62 @@
       renderAgendamentosTable(f);
     }
 
-    function updateStatus(id, status) {
+    // Mensagem enviada ao cliente (WhatsApp) para cada mudança de status
+    const MSG_STATUS_WPP = {
+      confirmado: { titulo: 'Confirmar Agendamento',  tipo: 'de confirmação' },
+      concluido:  { titulo: 'Concluir Atendimento',   tipo: 'de agradecimento' },
+      cancelado:  { titulo: 'Cancelar Agendamento',   tipo: 'de cancelamento' },
+    };
+
+    function mensagemStatusWpp(ag, status) {
+      const primeiroNome = (ag.cliente || 'Cliente').split(' ')[0];
+      const detalhes = [
+        '*Detalhes:*',
+        '*Serviço:* ' + (ag.servico || '--'),
+        '*Data:* ' + (ag.data ? formatDate(ag.data) : '--'),
+        '*Horário:* ' + (ag.horario || '--'),
+      ];
       if (status === 'confirmado') {
-        // Mostra modal perguntando se quer enviar mensagem ao cliente
+        return [
+          'Olá, *' + primeiroNome + '*!', '',
+          'Seu agendamento na *Wellisson Barber* foi *confirmado*!', '',
+          ...detalhes,
+          '*Valor:* R$' + (ag.preco || 0).toFixed(2).replace('.', ','), '',
+          'Te esperamos! Qualquer dúvida é só chamar.',
+        ].join('\n');
+      }
+      if (status === 'concluido') {
+        return [
+          'Olá, *' + primeiroNome + '*!', '',
+          'Muito obrigado por escolher a *Wellisson Barber*! Foi um prazer te atender. 💈', '',
+          'Esperamos te ver de novo em breve. Quando quiser agendar o próximo horário, é só chamar!',
+        ].join('\n');
+      }
+      return [
+        'Olá, *' + primeiroNome + '*!', '',
+        'Informamos que o seu agendamento na *Wellisson Barber* foi *cancelado*.', '',
+        ...detalhes, '',
+        'Se quiser remarcar, é só nos chamar por aqui. Qualquer dúvida, estamos à disposição!',
+      ].join('\n');
+    }
+
+    function updateStatus(id, status) {
+      const cfg = MSG_STATUS_WPP[status];
+      if (cfg) {
+        // Pergunta se quer avisar o cliente pelo WhatsApp (confirmar / concluir / cancelar)
         const ag = allAgendamentos.find(a => a.id === id);
         const nome = ag ? (ag.cliente || 'cliente') : 'cliente';
+        document.getElementById('confirm-modal-titulo').textContent = cfg.titulo;
+        document.getElementById('confirm-modal-tipo').textContent = cfg.tipo;
         document.getElementById('confirm-modal-nome').textContent = nome;
         document.getElementById('confirm-modal').style.display = 'flex';
         document.getElementById('confirm-modal-sim').onclick = function() {
           fecharConfirmModal();
-          salvarStatus(id, 'confirmado', true);
+          salvarStatus(id, status, true);
         };
         document.getElementById('confirm-modal-nao').onclick = function() {
           fecharConfirmModal();
-          salvarStatus(id, 'confirmado', false);
+          salvarStatus(id, status, false);
         };
         return;
       }
@@ -1329,31 +1371,18 @@
     }
 
     function salvarStatus(id, status, enviarWpp) {
-      // iOS Safari bloqueia window.open dentro de .then() (async).
-      // Por isso abrimos o WhatsApp ANTES da Promise, direto no clique do usuário.
-      if (enviarWpp && status === 'confirmado') {
-        const ag = allAgendamentos.find(a => a.id === id);
-        if (ag && ag.telefone) {
-          const primeiroNome = (ag.cliente || 'Cliente').split(' ')[0];
-          const phone = ag.telefone.replace(/\D/g, '');
-          const msg = [
-            'Ola, *' + primeiroNome + '*!',
-            '',
-            'Seu agendamento na *Wellisson Barber* foi *confirmado*!',
-            '',
-            '*Detalhes:*',
-            '*Servico:* ' + (ag.servico || '--'),
-            '*Data:* ' + (ag.data ? formatDate(ag.data) : '--'),
-            '*Horario:* ' + (ag.horario || '--'),
-            '*Valor:* R$' + (ag.preco || 0).toFixed(2).replace('.', ','),
-            '',
-            'Te esperamos! Qualquer duvida e so chamar.',
-          ].join('\n');
-          window.location.href = 'https://wa.me/55' + phone + '?text=' + encodeURIComponent(msg);
-        }
-      }
+      // Salva primeiro (a gravação já sai no clique) e só depois abre o WhatsApp.
+      // O WhatsApp é aberto direto no clique do usuário: iOS Safari bloqueia window.open dentro de .then() (async).
       db.collection('agendamentos').doc(id).update({ status, atualizadoEm: firebase.firestore.FieldValue.serverTimestamp() })
         .catch(() => alert('Erro ao atualizar status.'));
+      if (enviarWpp && MSG_STATUS_WPP[status]) {
+        const ag = allAgendamentos.find(a => a.id === id);
+        const phone = ag && ag.telefone ? ag.telefone.replace(/\D/g, '') : '';
+        if (!phone) { showToast('Cliente sem WhatsApp cadastrado: mensagem não enviada.'); return; }
+        const url = 'https://wa.me/55' + phone + '?text=' + encodeURIComponent(mensagemStatusWpp(ag, status));
+        // Nova aba/app: o painel continua aberto e a gravação não é interrompida
+        if (!window.open(url, '_blank')) window.location.href = url;
+      }
     }
 
     function deleteAgendamento(id) {
