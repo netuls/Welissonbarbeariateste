@@ -1,6 +1,6 @@
-const CACHE_NAME = 'wellisson-barbearia-v1';
+const CACHE_NAME = 'wellisson-barbearia-v2';
 
-// Arquivos essenciais para funcionar offline
+// Arquivos essenciais para funcionar offline (site do cliente)
 const STATIC_ASSETS = [
   './index.html',
   './style.css',
@@ -29,31 +29,49 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Estratégia: Network First para o Firebase (sempre tenta online),
-// Cache First para assets estáticos (CSS, fontes, HTML)
+// Estratégia:
+// - Firebase / APIs externas: sempre rede, sem cache
+// - HTML, JS e CSS (o código do site e do painel): REDE PRIMEIRO, cache só como reserva offline.
+//   Assim, quando você publica uma versão nova, ela aparece na hora (sem ficar preso em cache antigo).
+// - Imagens, fontes, manifest etc.: cache primeiro (carrega mais rápido)
 self.addEventListener('fetch', event => {
-  const url = event.request.url;
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = req.url;
 
-  // Firebase e APIs externas: sempre tenta a rede, sem cache
   if (
     url.includes('firestore.googleapis.com') ||
     url.includes('firebase') ||
     url.includes('googleapis.com/firestore') ||
     url.includes('wa.me')
   ) {
-    event.respondWith(fetch(event.request).catch(() => new Response('Offline', { status: 503 })));
+    event.respondWith(fetch(req).catch(() => new Response('Offline', { status: 503 })));
     return;
   }
 
-  // Assets estáticos: Cache First (carrega mais rápido)
+  const path = new URL(url).pathname;
+  const ehCodigo = req.mode === 'navigate' || /\.(html|js|css)$/i.test(path) || path.endsWith('/');
+
+  if (ehCodigo) {
+    event.respondWith(
+      fetch(req).then(response => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(req, clone));
+        }
+        return response;
+      }).catch(() => caches.match(req).then(c => c || caches.match('./index.html')))
+    );
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then(cached => {
+    caches.match(req).then(cached => {
       if (cached) return cached;
-      return fetch(event.request).then(response => {
-        // Salva no cache só respostas válidas
+      return fetch(req).then(response => {
         if (response && response.status === 200) {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          caches.open(CACHE_NAME).then(cache => cache.put(req, clone));
         }
         return response;
       }).catch(() => caches.match('./index.html'));
