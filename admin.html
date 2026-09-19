@@ -301,7 +301,10 @@
         <div class="recent-section">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;">
             <h3 style="margin:0;" id="recent-section-title">Agendamentos Recentes</h3>
-            <button onclick="abrirZerarReceitas()" style="background:transparent;border:1px solid rgba(200,60,60,0.35);color:#e05555;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Zerar receitas</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button onclick="abrirEditarReceita()" style="background:transparent;border:1px solid #EBC53166;color:#EBC531;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Editar receita</button>
+              <button onclick="abrirZerarReceitas()" style="background:transparent;border:1px solid rgba(200,60,60,0.35);color:#e05555;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Zerar receitas</button>
+            </div>
           </div>
           <div class="table-wrap" id="recent-list"></div>
         </div>
@@ -713,6 +716,25 @@
       <div style="display:flex;gap:12px;">
         <button onclick="fecharZerarReceitas()" style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">Cancelar</button>
         <button id="zerar-receitas-confirmar" onclick="confirmarZerarReceitas()" disabled style="flex:1;padding:12px;background:rgba(176,48,48,0.08);border:1px solid rgba(176,48,48,0.2);border-radius:6px;color:#7183B4;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:not-allowed;">Zerar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="editrec-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;align-items:center;justify-content:center;">
+    <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:24px 22px;max-width:680px;width:94%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
+      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:6px;">Editar receita</h3>
+      <p style="font-family:'Roboto',sans-serif;font-size:12px;color:#7183B4;line-height:1.5;margin-bottom:14px;">Corrija o valor de cada atendimento e de cada pagamento de plano. Use ✕ para tirar um item da receita (ele continua no histórico, só deixa de somar).</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <input type="date" id="editrec-de" onchange="renderEditarReceita()" title="De" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 10px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;color-scheme:dark;"/>
+        <input type="date" id="editrec-ate" onchange="renderEditarReceita()" title="Até" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 10px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;color-scheme:dark;"/>
+        <input type="text" id="editrec-busca" oninput="renderEditarReceita()" placeholder="Buscar cliente..." style="flex:1;min-width:130px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 12px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;"/>
+      </div>
+      <div id="editrec-resumo" style="font-family:'Roboto',sans-serif;font-size:12px;color:#94A4CC;margin-bottom:8px;"></div>
+      <div id="editrec-lista" style="overflow-y:auto;flex:1;min-height:120px;display:flex;flex-direction:column;gap:6px;padding-right:2px;"></div>
+      <div id="editrec-status" style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;min-height:16px;margin:10px 0 8px;color:#94A4CC;"></div>
+      <div style="display:flex;gap:12px;">
+        <button onclick="fecharEditarReceita()" style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">Cancelar</button>
+        <button id="editrec-salvar" onclick="salvarEditarReceita()" style="flex:1;padding:12px;background:#EBC531;border:none;border-radius:6px;color:#070E24;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;">Salvar alterações</button>
       </div>
     </div>
   </div>
@@ -2133,6 +2155,152 @@
         console.warn(e);
         aviso('Erro ao trocar o plano.', '#e05555');
       }
+    }
+
+    // ── Editar receita ──
+    // Lista os atendimentos concluídos e os pagamentos de plano que entram na receita,
+    // permite corrigir o valor de cada um ou tirá-lo da receita.
+    let _editRec = { itens: [], edits: {} };   // edits[id] = { valor: string, removido: bool }
+
+    function coletarItensReceita() {
+      const itens = [];
+      allAgendamentos.forEach(a => {
+        if (a.status !== 'concluido' || a.receitaZerada || !a.id) return;
+        if (atendimentoCobertoPorPlano(a)) return;        // atendimento coberto por plano não gera receita
+        itens.push({ id: 'ag:' + a.id, tipo: 'ag', agId: a.id, data: a.data || '', nome: a.cliente || '—',
+                     desc: a.servico || 'Atendimento', valor: precoAgendamento(a) });
+      });
+      Object.entries(_clientesFirestore).forEach(([key, c]) => {
+        if (!c || !Array.isArray(c.planoPagamentos)) return;
+        c.planoPagamentos.forEach((p, idx) => {
+          if (!p || p.zerado || !p.data) return;
+          itens.push({ id: 'pl:' + key + ':' + idx, tipo: 'pl', key, idx, data: p.data, nome: c.nome || key,
+                       desc: 'Mensalidade · ' + planoDados(p.plano || c.plano).nome, valor: Number(p.valor) || 0 });
+        });
+      });
+      return itens.sort((x, y) => (y.data || '').localeCompare(x.data || ''));
+    }
+    function abrirEditarReceita() {
+      _editRec = { itens: coletarItensReceita(), edits: {} };
+      // começa com o mesmo período do filtro do dashboard (se houver)
+      document.getElementById('editrec-de').value  = document.getElementById('dash-filter-de').value  || '';
+      document.getElementById('editrec-ate').value = document.getElementById('dash-filter-ate').value || '';
+      document.getElementById('editrec-busca').value = '';
+      document.getElementById('editrec-status').textContent = '';
+      renderEditarReceita();
+      document.getElementById('editrec-modal').style.display = 'flex';
+    }
+    function fecharEditarReceita() { document.getElementById('editrec-modal').style.display = 'none'; }
+    function editRecValorAtual(it) {
+      const e = _editRec.edits[it.id];
+      if (!e) return it.valor;
+      if (e.removido) return 0;
+      const v = Number(String(e.valor).replace(',', '.'));
+      return isNaN(v) || v < 0 ? it.valor : v;
+    }
+    function editRecItensVisiveis() {
+      const de = document.getElementById('editrec-de').value;
+      const ate = document.getElementById('editrec-ate').value;
+      const q = (document.getElementById('editrec-busca').value || '').toLowerCase().trim();
+      return _editRec.itens.filter(it =>
+        (!de || it.data >= de) && (!ate || it.data <= ate) && (!q || String(it.nome).toLowerCase().includes(q)));
+    }
+    function renderEditarReceita() {
+      const lista = document.getElementById('editrec-lista');
+      const vis = editRecItensVisiveis();
+      if (!vis.length) {
+        lista.innerHTML = '<p style="color:#5E6E9E;font-family:Oswald,sans-serif;font-size:13px;letter-spacing:1px;padding:16px 0;">Nenhum lançamento de receita neste período.</p>';
+        atualizarResumoEditarReceita();
+        return;
+      }
+      lista.innerHTML = vis.map(it => {
+        const e = _editRec.edits[it.id] || {};
+        const rem = !!e.removido;
+        const val = e.valor != null ? e.valor : it.valor.toFixed(2);
+        const idAttr = escPlano(it.id);
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0A1330;border:1px solid ' + (rem ? '#5a2020' : '#122452') + ';border-radius:6px;padding:9px 12px;opacity:' + (rem ? '.55' : '1') + ';">' +
+          '<div style="flex:1;min-width:150px;">' +
+            '<div style="font-family:\'Oswald\',sans-serif;font-size:13px;color:#F1EAD6;letter-spacing:.5px;' + (rem ? 'text-decoration:line-through;' : '') + '">' + escPlano(it.nome) + '</div>' +
+            '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#7183B4;">' + (it.data ? fmtDataBR(it.data) : '--') + ' · ' + escPlano(it.desc) + '</div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:6px;">' +
+            '<span style="font-family:\'Roboto\',sans-serif;font-size:12px;color:#5E6E9E;">R$</span>' +
+            '<input type="number" min="0" step="0.01" value="' + escPlano(val) + '" ' + (rem ? 'disabled ' : '') + 'oninput="editRecMudou(\'' + idAttr + '\', this.value)" ' +
+              'style="width:88px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:7px 8px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:14px;outline:none;"/>' +
+            '<button onclick="editRecAlternarRemover(\'' + idAttr + '\')" title="' + (rem ? 'Voltar para a receita' : 'Tirar da receita') + '" style="width:32px;height:32px;border-radius:6px;cursor:pointer;background:' + (rem ? '#1B3168' : 'transparent') + ';border:1px solid ' + (rem ? '#2C4E9E' : 'rgba(200,60,60,0.4)') + ';color:' + (rem ? '#F1EAD6' : '#e05555') + ';font-size:13px;">' + (rem ? '↩' : '✕') + '</button>' +
+          '</div></div>';
+      }).join('');
+      atualizarResumoEditarReceita();
+    }
+    function editRecMudou(id, v) {
+      const e = _editRec.edits[id] = _editRec.edits[id] || {};
+      e.valor = v;
+      atualizarResumoEditarReceita();
+    }
+    function editRecAlternarRemover(id) {
+      const it = _editRec.itens.find(x => x.id === id);
+      const e = _editRec.edits[id] = _editRec.edits[id] || { valor: it ? it.valor.toFixed(2) : '0' };
+      e.removido = !e.removido;
+      renderEditarReceita();
+    }
+    function atualizarResumoEditarReceita() {
+      const vis = editRecItensVisiveis();
+      const antes = vis.reduce((s, it) => s + it.valor, 0);
+      const depois = vis.reduce((s, it) => s + editRecValorAtual(it), 0);
+      const mudou = Object.keys(_editRec.edits).length;
+      document.getElementById('editrec-resumo').innerHTML =
+        vis.length + ' lançamento' + (vis.length === 1 ? '' : 's') + ' · Total listado: <strong style="color:#F1EAD6;">' + fmtMoedaPlano(antes) + '</strong>' +
+        (Math.abs(depois - antes) > 0.004 ? ' → <strong style="color:#EBC531;">' + fmtMoedaPlano(depois) + '</strong>' : '') +
+        (mudou ? ' · <span style="color:#EBC531;">' + mudou + ' alterado' + (mudou === 1 ? '' : 's') + '</span>' : '');
+    }
+    async function salvarEditarReceita() {
+      const st = document.getElementById('editrec-status');
+      const btn = document.getElementById('editrec-salvar');
+      const ops = [];
+      const clientes = {};   // key -> nova lista de pagamentos
+      let invalido = false;
+      _editRec.itens.forEach(it => {
+        const e = _editRec.edits[it.id];
+        if (!e) return;
+        const novo = Number(String(e.valor).replace(',', '.'));
+        if (!e.removido && (isNaN(novo) || novo < 0)) { invalido = true; return; }
+        if (!e.removido && Math.abs(novo - it.valor) < 0.004) return;   // nada mudou
+        if (it.tipo === 'ag') {
+          ops.push({ ref: db.collection('agendamentos').doc(it.agId), data: e.removido ? { receitaZerada: true } : { preco: novo }, ag: it.agId, removido: !!e.removido, novo });
+        } else {
+          const c = _clientesFirestore[it.key];
+          if (!c || !Array.isArray(c.planoPagamentos)) return;
+          const lista = clientes[it.key] || (clientes[it.key] = c.planoPagamentos.map(p => ({ ...p })));
+          const p = lista[it.idx];
+          if (!p || p.data !== it.data || (Number(p.valor) || 0) !== it.valor) return;   // mudou por outro lado: ignora
+          if (e.removido) p.zerado = true; else p.valor = novo;
+        }
+      });
+      if (invalido) { st.style.color = '#e05555'; st.textContent = 'Há valores inválidos. Use números maiores ou iguais a zero.'; return; }
+      const agOps = ops;
+      const clOps = Object.entries(clientes).map(([key, lista]) => ({ ref: db.collection('clientes').doc(key), data: { planoPagamentos: lista }, key, lista }));
+      if (!agOps.length && !clOps.length) { st.style.color = '#94A4CC'; st.textContent = 'Nenhuma alteração para salvar.'; return; }
+      btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+      try {
+        const todos = [...agOps, ...clOps];
+        for (let i = 0; i < todos.length; i += 400) {
+          const batch = db.batch();
+          todos.slice(i, i + 400).forEach(o => batch.update(o.ref, o.data));
+          await batch.commit();
+        }
+        agOps.forEach(o => {
+          const a = allAgendamentos.find(x => x.id === o.ag);
+          if (a) { if (o.removido) a.receitaZerada = true; else a.preco = o.novo; }
+        });
+        clOps.forEach(o => { if (_clientesFirestore[o.key]) _clientesFirestore[o.key].planoPagamentos = o.lista; });
+        fecharEditarReceita();
+        showToast('Receita atualizada (' + todos.length + ' lançamento' + (todos.length === 1 ? '' : 's') + ').');
+        try { renderDashboard(); } catch (e) {}
+        try { renderClientes(); } catch (e) {}
+      } catch (e) {
+        console.warn(e);
+        st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+      } finally { btn.disabled = false; }
     }
 
     // ── Zerar receitas ──
