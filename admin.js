@@ -1,1057 +1,3315 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <!-- PWA -->
-  <link rel="manifest" href="manifest.json"/>
-  <meta name="theme-color" content="#070E24"/>
-  <meta name="mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-  <meta name="apple-mobile-web-app-title" content="Wellisson Admin"/>
-  <!-- Ícone Apple (iOS/iPadOS) -->
-  <link rel="apple-touch-icon" sizes="180x180" href="logo_180.png"/>
-  <link rel="apple-touch-icon" sizes="192x192" href="logo_192.png"/>
-  <link rel="apple-touch-icon" sizes="512x512" href="logo_512.png"/>
-  <!-- Ícone Android / Desktop -->
-  <link rel="icon" type="image/png" sizes="512x512" href="logo_512.png"/>
-  <link rel="icon" type="image/png" sizes="192x192" href="logo_192.png"/>
-  <link rel="icon" type="image/png" href="logo_512.png"/>
-  <link rel="stylesheet" href="admin.css"/>
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet"/>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
-  <script src="config.js"></script>
-  <style>
-    #dash-filter-de::-webkit-calendar-picker-indicator,
-    #dash-filter-ate::-webkit-calendar-picker-indicator { filter: invert(0.5) sepia(1) saturate(2) hue-rotate(5deg); cursor: pointer; }
-    #stat-card-receita-dia { animation: fadeInCard .35s ease; }
-    @keyframes fadeInCard { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
-    #dash-date-filter-bar input[type="date"]:focus { border-color: #EBC531 !important; box-shadow: 0 0 0 2px rgba(235,197,49,.15); }
+// ── Firebase ─────────────────────────────────────
+// FIREBASE_CONFIG vem do config.js (compartilhado com o site).
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.firestore();
 
-    /* ── iOS PWA Safe Area ── */
-    @supports (padding-bottom: env(safe-area-inset-bottom)) {
-      .bottom-nav {
-        height: calc(62px + env(safe-area-inset-bottom)) !important;
-        padding-bottom: env(safe-area-inset-bottom) !important;
+// ── Push Notifications (FCM) ─────────────────────
+// Chave pública VAPID deste projeto: console do Firebase >
+// Configurações do projeto > Cloud Messaging > Certificados push da Web.
+// Enquanto estiver vazia, o painel funciona normal e só não registra push.
+const FCM_VAPID_KEY = 'BCuj7wsTBupV5cgMBp0jYVvmplx47ShUwyFbUwWuNxoL2NW97__UR0TVXmszcGBFygSxA5Fwaz_pIs-yDM4_RRE';
+let _messaging = null;
+let _fcmToken = null;
+try {
+  _messaging = firebase.messaging();
+} catch(e) { console.warn('FCM não suportado:', e); }
+
+// ── Estado Global (declarado no topo para evitar TDZ) ────────────
+let allAgendamentos = [];
+let unsubscribe = null;
+let _agendamentosKnownIds = null;
+let _clientesFirestore = {};
+let _clientListCache = [];
+let datasEspeciais = {};
+let deAlmocoAtivo = false;
+let _notificacoes = [];
+let _notifPanelOpen = false;
+
+const DIAS_SEMANA = [
+  { key:'domingo', label:'Domingo' },
+  { key:'segunda', label:'Segunda-feira' },
+  { key:'terca',   label:'Terca-feira' },
+  { key:'quarta',  label:'Quarta-feira' },
+  { key:'quinta',  label:'Quinta-feira' },
+  { key:'sexta',   label:'Sexta-feira' },
+  { key:'sabado',  label:'Sabado' },
+];
+
+const DEFAULT_HORARIOS = {
+  domingo: { ativo:false, inicio:'08:00', fim:'18:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+  segunda: { ativo:true,  inicio:'08:00', fim:'19:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+  terca:   { ativo:true,  inicio:'08:00', fim:'19:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+  quarta:  { ativo:true,  inicio:'08:00', fim:'19:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+  quinta:  { ativo:true,  inicio:'08:00', fim:'19:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+  sexta:   { ativo:true,  inicio:'08:00', fim:'19:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+  sabado:  { ativo:true,  inicio:'08:00', fim:'17:00', almoco:false, almoco_inicio:'12:00', almoco_fim:'13:00' },
+};
+
+let horariosConfig = JSON.parse(JSON.stringify(DEFAULT_HORARIOS));
+
+
+// ── Login (Firebase Authentication) ──────────────
+// O painel pede só a senha. Por trás, ela entra com este e-mail fixo,
+// que precisa existir em Authentication > Users no console do Firebase,
+// com a senha que você quiser. Não existe senha escrita neste arquivo.
+const ADMIN_EMAIL = 'admin@wellissonbarbearia.app';
+const auth = firebase.auth();
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+
+const SERVICES = [
+  { id: 'corte',             name: 'Corte',                        price: 30,  duracao: 30 },
+  { id: 'barba',             name: 'Barba',                        price: 20,  duracao: 30 },
+  { id: 'sobrancelha',       name: 'Sobrancelha',                  price: 10,  duracao: 30 },
+  { id: 'corte_barba',       name: 'Corte + Barba',                price: 45,  duracao: 40 },
+  { id: 'corte_barba_sob',   name: 'Corte + Barba + Sobrancelha', price: 50,  duracao: 45 },
+  { id: 'luzes',             name: 'Luzes',                        price: 60,  duracao: 60 },
+  { id: 'luzes_corte',       name: 'Luzes + Corte',                price: 80,  duracao: 60 },
+  { id: 'platinado',         name: 'Platinado',                    price: 80,  duracao: 60 },
+  { id: 'platinado_corte',   name: 'Platinado + Corte',            price: 110, duracao: 60 }
+];
+
+const PLANS = [
+  { name: 'Barba',         price: 50,  features: ['Barba 1x por semana'] },
+  { name: 'Simples',       price: 50,  features: ['2x no mes','Inclui finalizacao e lavagem'] },
+  { name: 'Intermediario', price: 90,  features: ['Quantas vezes voce quiser no mes','Inclui finalizacao e lavagem'] },
+  { name: 'Senior',        price: 130, features: ['Quantas vezes voce quiser no mes','Inclui finalizacao e lavagem'] }
+];
+
+
+// ── Auth ─────────────────────────────────────────
+
+let _adminIniciado = false;
+
+function mostrarPainel() {
+  document.getElementById('login-screen').style.cssText = 'display:none!important;';
+  document.getElementById('admin-panel').style.cssText  = 'display:flex!important;';
+  if (!_adminIniciado) { _adminIniciado = true; initAdmin(); }
+}
+
+function mostrarLogin() {
+  document.getElementById('login-screen').style.cssText = 'display:flex!important;';
+  document.getElementById('admin-panel').style.cssText  = 'display:none!important;';
+  const btn = document.querySelector('.btn-login');
+  if (btn) { btn.textContent = 'Entrar'; btn.disabled = false; }
+}
+
+function erroLoginTexto(code) {
+  switch (code) {
+    case 'auth/invalid-email':     return 'E-mail inválido.';
+    case 'auth/user-disabled':     return 'Este acesso foi desativado.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':return 'E-mail ou senha incorretos.';
+    case 'auth/too-many-requests': return 'Muitas tentativas. Aguarde alguns minutos.';
+    case 'auth/network-request-failed': return 'Sem conexão. Tente de novo.';
+    default: return 'Não foi possível entrar. Tente de novo.';
+  }
+}
+
+async function doLogin() {
+  const pass  = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  if (!pass)  { errEl.textContent = 'Digite a senha.';  return; }
+  const btn = document.querySelector('.btn-login');
+  btn.textContent = 'Entrando...';
+  btn.disabled = true;
+  try {
+    await auth.signInWithEmailAndPassword(ADMIN_EMAIL, pass);
+    // onAuthStateChanged abre o painel
+  } catch (e) {
+    errEl.textContent = erroLoginTexto(e.code);
+    btn.textContent = 'Entrar';
+    btn.disabled = false;
+  }
+}
+
+async function doLogout() {
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  try { await auth.signOut(); } catch(e) {}
+  document.getElementById('login-pass').value  = '';
+  document.getElementById('login-error').textContent = '';
+  location.reload();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') doLogin();
+});
+
+// A sessão fica salva no próprio Firebase: quem já entrou não precisa digitar de novo.
+auth.onAuthStateChanged(user => {
+  if (user) mostrarPainel(); else mostrarLogin();
+});
+
+function initAdmin() {
+  const el = document.getElementById('admin-date');
+  if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  loadAgendamentos();
+  carregarPrecosServicos();
+  carregarConfigBarbearia().then(() => {
+    const tabAj = document.getElementById('tab-ajustes');
+    if (tabAj && tabAj.classList.contains('active')) renderAjustesForm();
+  });
+  verificarAniversariosGlobal();
+  verificarPlanosGlobal();
+  carregarClientesFirestore().then(() => { try { renderDashboard(); } catch (e) {} });
+  solicitarPermissaoNotificacao();
+  if ('Notification' in window && Notification.permission === 'granted') iniciarPushNotifications();
+  atualizarBotaoPush();
+  renderNotifPanel(); // inicia painel vazio
+}
+
+// ── Valores dos serviços ─────────────────────────
+// Guardados em config/servicos (o site lê o mesmo documento):
+//   precos: { corte: 30, barba: 20, ... }   lista: [{ id, name, price }]
+const SERVICES_ORIGINAIS = SERVICES.map(s => Object.assign({}, s));
+const PRECOS_PADRAO = {};
+const DURACOES_PADRAO = {};
+SERVICES.forEach(s => { PRECOS_PADRAO[s.id] = s.price; DURACOES_PADRAO[s.id] = s.duracao; });
+
+function fmtPrecoServ(v) { return 'R$' + Number(v).toFixed(2).replace('.', ','); }
+
+function slugServico(nome) {
+  let base = String(nome || 'servico').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'servico';
+  let id = base, n = 2;
+  while (SERVICES.some(s => s.id === id)) { id = base + '_' + n; n++; }
+  return id;
+}
+
+async function carregarPrecosServicos() {
+  try {
+    const doc = await db.collection('config').doc('servicos').get();
+    if (doc.exists) {
+      const dados = doc.data() || {};
+      if (Array.isArray(dados.lista) && dados.lista.length) {
+        // A lista salva é a fonte da verdade: reflete serviços adicionados/removidos no painel.
+        SERVICES.length = 0;
+        dados.lista.forEach(item => {
+          if (!item || !item.id || !item.name) return;
+          SERVICES.push({
+            id: item.id, name: item.name,
+            price: Number(item.price) >= 0 ? Number(item.price) : 0,
+            duracao: Number(item.duracao) > 0 ? Number(item.duracao) : 30,
+          });
+        });
+      } else {
+        const precos = dados.precos || {};
+        const duracoes = dados.duracoes || {};
+        SERVICES.forEach(s => {
+          const v = Number(precos[s.id]);
+          if (precos[s.id] != null && !isNaN(v) && v >= 0) s.price = v;
+          const d = Number(duracoes[s.id]);
+          if (duracoes[s.id] != null && !isNaN(d) && d > 0) s.duracao = d;
+        });
       }
-      .admin-main {
-        padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+    }
+  } catch (e) { console.warn('Não foi possível carregar os preços dos serviços', e); }
+  if (document.getElementById('tab-servicos') && document.getElementById('tab-servicos').classList.contains('active')) renderServicosEditor();
+}
+
+function linhaServicoHtml(s) {
+  const key = escPlano(s.id);
+  return '<div class="serv-linha" data-key="' + key + '" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
+    '<span class="serv-handle" title="Arraste para reordenar" ' +
+      'style="cursor:grab;display:flex;align-items:center;justify-content:center;padding:4px;touch-action:none;user-select:none;flex-shrink:0;">' +
+      '<svg width="14" height="20" viewBox="0 0 14 20" fill="none" style="pointer-events:none;">' +
+        '<circle cx="4" cy="4" r="1.6" fill="#5E6E9E"/><circle cx="10" cy="4" r="1.6" fill="#5E6E9E"/>' +
+        '<circle cx="4" cy="10" r="1.6" fill="#5E6E9E"/><circle cx="10" cy="10" r="1.6" fill="#5E6E9E"/>' +
+        '<circle cx="4" cy="16" r="1.6" fill="#5E6E9E"/><circle cx="10" cy="16" r="1.6" fill="#5E6E9E"/>' +
+      '</svg>' +
+    '</span>' +
+    '<input type="text" data-name="' + key + '" value="' + escPlano(s.name) + '" placeholder="Nome do serviço" ' +
+      'style="flex:1;min-width:150px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Oswald\',sans-serif;font-size:13px;letter-spacing:.5px;outline:none;"/>' +
+    '<div style="display:flex;align-items:center;gap:6px;">' +
+      '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">R$</span>' +
+      '<input type="number" min="0" step="0.5" data-serv="' + key + '" value="' + s.price.toFixed(2) + '" ' +
+        'style="width:90px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;gap:6px;">' +
+      '<input type="number" min="5" step="5" data-dur="' + key + '" value="' + s.duracao + '" ' +
+        'style="width:70px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+      '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">min</span>' +
+    '</div>' +
+    '<button type="button" onclick="removerServicoLinha(this)" title="Remover serviço" ' +
+      'style="background:transparent;border:1px solid #3a1f26;color:#c96666;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;">×</button>' +
+  '</div>';
+}
+
+function renderServicosEditor() {
+  const el = document.getElementById('servicos-lista');
+  if (!el) return;
+  el.innerHTML = SERVICES.map(linhaServicoHtml).join('');
+  document.getElementById('servicos-status').textContent = '';
+  ativarArrastarServicos();
+}
+
+function adicionarServicoNovo() {
+  const el = document.getElementById('servicos-lista');
+  if (!el) return;
+  const novo = { id: '__novo_' + Date.now(), name: '', price: 0, duracao: 30 };
+  el.insertAdjacentHTML('beforeend', linhaServicoHtml(novo));
+  const linhas = el.querySelectorAll('.serv-linha');
+  const ultima = linhas[linhas.length - 1];
+  const nomeInput = ultima.querySelector('input[data-name]');
+  if (nomeInput) nomeInput.focus();
+  ultima.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  ativarArrastarServicos();
+}
+
+// ── Arrastar para reordenar os serviços ──
+function ativarArrastarServicos() {
+  const lista = document.getElementById('servicos-lista');
+  if (!lista) return;
+  lista.querySelectorAll('.serv-handle').forEach(handle => {
+    handle.onpointerdown = iniciarArrasteServico;
+  });
+}
+
+let _arrasteServico = null;
+
+function iniciarArrasteServico(ev) {
+  const linha = ev.currentTarget.closest('.serv-linha');
+  const lista = document.getElementById('servicos-lista');
+  if (!linha || !lista) return;
+  ev.preventDefault();
+
+  const rect = linha.getBoundingClientRect();
+  const placeholder = document.createElement('div');
+  placeholder.className = 'serv-placeholder';
+  placeholder.style.cssText = 'height:' + rect.height + 'px;border:1.5px dashed #2C4E9E;border-radius:6px;background:rgba(44,78,158,0.10);flex-shrink:0;';
+
+  _arrasteServico = { linha, lista, offsetY: ev.clientY - rect.top, placeholder };
+
+  linha.style.position = 'fixed';
+  linha.style.zIndex = '999';
+  linha.style.width = rect.width + 'px';
+  linha.style.left = rect.left + 'px';
+  linha.style.top = rect.top + 'px';
+  linha.style.pointerEvents = 'none';
+  linha.style.boxShadow = '0 12px 26px rgba(0,0,0,0.45)';
+  linha.querySelector('.serv-handle').style.cursor = 'grabbing';
+
+  linha.parentNode.insertBefore(placeholder, linha.nextSibling);
+
+  document.addEventListener('pointermove', moverArrasteServico);
+  document.addEventListener('pointerup', soltarArrasteServico, { once: true });
+}
+
+function moverArrasteServico(ev) {
+  if (!_arrasteServico) return;
+  const { linha, lista, offsetY, placeholder } = _arrasteServico;
+  linha.style.top = (ev.clientY - offsetY) + 'px';
+
+  const irmaos = Array.from(lista.querySelectorAll('.serv-linha')).filter(el => el !== linha);
+  let alvo = null;
+  for (const el of irmaos) {
+    const r = el.getBoundingClientRect();
+    if (ev.clientY < r.top + r.height / 2) { alvo = el; break; }
+  }
+  if (alvo) lista.insertBefore(placeholder, alvo);
+  else lista.appendChild(placeholder);
+
+  // Auto-scroll quando arrasta perto do topo/rodapé da tela
+  const margem = 60;
+  if (ev.clientY < margem) window.scrollBy(0, -12);
+  else if (ev.clientY > window.innerHeight - margem) window.scrollBy(0, 12);
+}
+
+function soltarArrasteServico() {
+  if (!_arrasteServico) return;
+  const { linha, placeholder } = _arrasteServico;
+  placeholder.parentNode.insertBefore(linha, placeholder);
+  placeholder.remove();
+  linha.style.position = '';
+  linha.style.zIndex = '';
+  linha.style.width = '';
+  linha.style.left = '';
+  linha.style.top = '';
+  linha.style.pointerEvents = '';
+  linha.style.boxShadow = '';
+  const handle = linha.querySelector('.serv-handle');
+  if (handle) handle.style.cursor = 'grab';
+  document.removeEventListener('pointermove', moverArrasteServico);
+  _arrasteServico = null;
+  const st = document.getElementById('servicos-status');
+  if (st) { st.style.color = '#94A4CC'; st.textContent = 'Ordem alterada. Clique em Salvar Valores para aplicar no site.'; }
+}
+
+function removerServicoLinha(btn) {
+  const linha = btn.closest('.serv-linha');
+  if (linha) linha.remove();
+}
+
+function restaurarPrecosPadrao() {
+  SERVICES.length = 0;
+  SERVICES_ORIGINAIS.forEach(s => SERVICES.push(Object.assign({}, s)));
+  renderServicosEditor();
+  const st = document.getElementById('servicos-status');
+  st.style.color = '#94A4CC';
+  st.textContent = 'Lista e valores padrão restaurados. Clique em Salvar para aplicar.';
+}
+
+async function salvarServicos() {
+  const st = document.getElementById('servicos-status');
+  const btn = document.getElementById('btn-salvar-servicos');
+  const linhas = document.querySelectorAll('#servicos-lista .serv-linha');
+  const novaLista = [];
+  const novosPrecos = {};
+  const novasDuracoes = {};
+  let invalido = false;
+
+  linhas.forEach(linha => {
+    const nomeInp = linha.querySelector('input[data-name]');
+    const precoInp = linha.querySelector('input[data-serv]');
+    const durInp = linha.querySelector('input[data-dur]');
+    const nome = (nomeInp.value || '').trim();
+    const preco = Number(String(precoInp.value).replace(',', '.'));
+    const dur = Number(durInp.value);
+
+    [nomeInp, precoInp, durInp].forEach(i => i.style.borderColor = '#233F80');
+    if (!nome) { invalido = true; nomeInp.style.borderColor = '#e05555'; }
+    if (precoInp.value === '' || isNaN(preco) || preco < 0) { invalido = true; precoInp.style.borderColor = '#e05555'; }
+    if (durInp.value === '' || isNaN(dur) || dur <= 0) { invalido = true; durInp.style.borderColor = '#e05555'; }
+    if (invalido) return;
+
+    let id = linha.dataset.key;
+    if (!id || id.indexOf('__novo_') === 0) id = slugServico(nome);
+    novaLista.push({ id, name: nome, price: Math.round(preco * 100) / 100, duracao: Math.round(dur) });
+  });
+
+  if (!novaLista.length) invalido = true;
+  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Confira os campos destacados: nome, preço e duração são obrigatórios.'; return; }
+
+  novaLista.forEach(s => { novosPrecos[s.id] = s.price; novasDuracoes[s.id] = s.duracao; });
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('servicos').set({
+      precos: novosPrecos,
+      duracoes: novasDuracoes,
+      lista: novaLista,
+      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    SERVICES.length = 0;
+    novaLista.forEach(s => SERVICES.push(Object.assign({}, s)));
+    renderServicosEditor();
+    st.style.color = '#4caf50'; st.textContent = 'Valores salvos! Já valem para novos agendamentos.';
+    showToast('Valores dos serviços atualizados.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+// ── Ajustes (identidade, letra e cores da barbearia) ──
+function escAj(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderAjustesForm() {
+  document.getElementById('aj-nome').value = BARBEARIA.nome || '';
+  document.getElementById('aj-whatsapp').value = BARBEARIA.whatsapp || '';
+  document.getElementById('aj-topo1').value = BARBEARIA.topoLinha1 || '';
+  document.getElementById('aj-topo2').value = BARBEARIA.topoLinha2 || '';
+  document.getElementById('aj-nomecurto').value = BARBEARIA.nomeCurto || '';
+  document.getElementById('aj-logo-preview').src = BARBEARIA.logoBase64 || BARBEARIA.logo;
+  renderLetraGrid();
+  _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
+  renderCoresGrid();
+  atualizarCoresDaLogo();
+}
+
+let _ajLogoBase64Selecionada = undefined; // undefined = não mexeu; null = voltar ao padrão; string = nova logo
+
+function ajLogoSelecionada(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  const reader = new FileReader();
+  reader.onload = e => {
+    img.onload = () => {
+      // Reduz para no máximo 300px do lado maior, para caber bem no Firestore
+      const max = 300;
+      const escala = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/png');
+      _ajLogoBase64Selecionada = dataUrl;
+      document.getElementById('aj-logo-preview').src = dataUrl;
+      atualizarCoresDaLogo();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function ajUsarLogoPadrao() {
+  _ajLogoBase64Selecionada = null;
+  document.getElementById('aj-logo-preview').src = BARBEARIA_PADRAO.logo;
+  atualizarCoresDaLogo();
+}
+
+async function salvarDadosBarbearia() {
+  const st = document.getElementById('aj-dados-status');
+  const btn = document.getElementById('btn-salvar-aj-dados');
+  const dados = {
+    nome: document.getElementById('aj-nome').value.trim() || BARBEARIA_PADRAO.nome,
+    whatsapp: document.getElementById('aj-whatsapp').value.trim().replace(/\D/g, '') || BARBEARIA_PADRAO.whatsapp,
+    topoLinha1: document.getElementById('aj-topo1').value.trim() || BARBEARIA_PADRAO.topoLinha1,
+    topoLinha2: document.getElementById('aj-topo2').value.trim() || BARBEARIA_PADRAO.topoLinha2,
+    nomeCurto: document.getElementById('aj-nomecurto').value.trim() || BARBEARIA_PADRAO.nomeCurto,
+  };
+  if (_ajLogoBase64Selecionada !== undefined) dados.logoBase64 = _ajLogoBase64Selecionada;
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('barbearia').set(dados, { merge: true });
+    Object.assign(BARBEARIA, dados);
+    try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
+    aplicarBarbearia(BARBEARIA);
+    _ajLogoBase64Selecionada = undefined;
+    st.style.color = '#4caf50'; st.textContent = 'Dados salvos! Já valem no site e no painel.';
+    showToast('Dados da barbearia atualizados.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+function renderLetraGrid() {
+  const el = document.getElementById('aj-letra-grid');
+  if (!el) return;
+  const atual = BARBEARIA.letra || 'classico';
+  el.innerHTML = Object.keys(LETRA_ESTILOS).map(key => {
+    const estilo = LETRA_ESTILOS[key];
+    const ativo = key === atual;
+    return '<div data-letra="' + key + '" onclick="selecionarLetra(\'' + key + '\')" style="cursor:pointer;text-align:center;padding:16px 10px;border-radius:6px;background:#0A1330;border:1.5px solid ' + (ativo ? '#EBC531' : '#16295C') + ';">' +
+      '<div style="' + estilo.top + 'font-size:14px;color:#F1EAD6;text-transform:uppercase;line-height:1.3;">' + escAj(BARBEARIA.topoLinha1 || 'Nome') + '</div>' +
+      '<div style="' + estilo.bottom + 'font-size:20px;color:#EBC531;text-transform:uppercase;line-height:1.3;">' + escAj(BARBEARIA.topoLinha2 || 'Barber') + '</div>' +
+      '<div style="margin-top:8px;font-family:\'Oswald\',sans-serif;font-size:10px;letter-spacing:1.5px;color:' + (ativo ? '#EBC531' : '#5E6E9E') + ';text-transform:uppercase;">' + estilo.label + (ativo ? ' · em uso' : '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+let _ajLetraSelecionada = null;
+function selecionarLetra(key) {
+  _ajLetraSelecionada = key;
+  document.querySelectorAll('#aj-letra-grid [data-letra]').forEach(d => {
+    d.style.borderColor = d.dataset.letra === key ? '#EBC531' : '#16295C';
+  });
+}
+
+async function salvarLetra() {
+  const st = document.getElementById('aj-letra-status');
+  const btn = document.getElementById('btn-salvar-aj-letra');
+  const letra = _ajLetraSelecionada || BARBEARIA.letra || 'classico';
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('barbearia').set({ letra }, { merge: true });
+    BARBEARIA.letra = letra;
+    try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
+    aplicarLetra(BARBEARIA);
+    renderLetraGrid();
+    st.style.color = '#4caf50'; st.textContent = 'Letra salva!';
+    showToast('Estilo de letra atualizado.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+let _ajPaletaSelecionada = null;
+let _ajCoresPendente = null; // { destaque, fundo } — seleção ainda não salva
+
+function renderCoresGrid() {
+  const el = document.getElementById('aj-cores-grid');
+  if (!el) return;
+  if (!_ajCoresPendente) _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
+
+  el.innerHTML = PALETAS_CORES.map(p => {
+    const ativo = _ajCoresPendente.destaque === p.destaque && _ajCoresPendente.fundo === p.fundo;
+    return '<div data-paleta="' + p.id + '" onclick="selecionarPaleta(\'' + p.id + '\')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:6px;background:#0A1330;border:1.5px solid ' + (ativo ? '#EBC531' : '#16295C') + ';">' +
+      '<span style="width:16px;height:16px;border-radius:50%;background:' + p.fundo + ';border:1px solid #233F80;flex-shrink:0;"></span>' +
+      '<span style="width:16px;height:16px;border-radius:50%;background:' + p.destaque + ';flex-shrink:0;"></span>' +
+      '<span style="font-family:\'Oswald\',sans-serif;font-size:11px;letter-spacing:1px;color:#B4BEDC;text-transform:uppercase;">' + p.label + '</span>' +
+    '</div>';
+  }).join('');
+
+  marcarSwatchesLogoAtivos();
+  atualizarPreviewCores();
+}
+
+function selecionarPaleta(id) {
+  _ajPaletaSelecionada = id;
+  const p = PALETAS_CORES.find(x => x.id === id);
+  if (p) _ajCoresPendente = { destaque: p.destaque, fundo: p.fundo };
+  renderCoresGrid();
+}
+
+// ── Cores extraídas da logo ──
+function corLogoSwatchHtml(hex, tipo) {
+  return '<div data-corlogo="' + hex + '" data-tipo="' + tipo + '" onclick="selecionarCorLogo(\'' + hex + '\',\'' + tipo + '\')" ' +
+    'title="' + hex.toUpperCase() + '" ' +
+    'style="cursor:pointer;width:36px;height:36px;border-radius:8px;background:' + hex + ';border:2px solid #16295C;flex-shrink:0;"></div>';
+}
+
+function extrairPaletaDeImagem(img, maxCores, modo) {
+  if (!img || !img.naturalWidth) return [];
+  const tam = 48;
+  const canvas = document.createElement('canvas');
+  canvas.width = tam; canvas.height = tam;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const escala = Math.min(tam / img.naturalWidth, tam / img.naturalHeight);
+  const w = Math.max(1, img.naturalWidth * escala);
+  const h = Math.max(1, img.naturalHeight * escala);
+  ctx.clearRect(0, 0, tam, tam);
+  ctx.drawImage(img, (tam - w) / 2, (tam - h) / 2, w, h);
+
+  let dados;
+  try { dados = ctx.getImageData(0, 0, tam, tam).data; } catch (e) { return []; }
+
+  const contagem = new Map();
+  const quant = v => Math.round(v / 20) * 20;
+  for (let i = 0; i < dados.length; i += 4) {
+    const r = dados[i], g = dados[i + 1], b = dados[i + 2], a = dados[i + 3];
+    if (a < 128) continue; // pixel transparente
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lum = (r + g + b) / 3;
+    if (lum > 246) continue; // quase branco
+    if (modo === 'viva') {
+      if (sat < 0.18 || lum < 35 || lum > 225) continue;
+    } else {
+      if (lum > 95 || lum < 6) continue; // tons escuros p/ fundo, evita preto absoluto
+    }
+    const key = quant(r) + ',' + quant(g) + ',' + quant(b);
+    const atual = contagem.get(key) || { r: 0, g: 0, b: 0, n: 0 };
+    atual.r += r; atual.g += g; atual.b += b; atual.n += 1;
+    contagem.set(key, atual);
+  }
+
+  const cores = Array.from(contagem.values())
+    .map(c => ({ r: Math.round(c.r / c.n), g: Math.round(c.g / c.n), b: Math.round(c.b / c.n), n: c.n }))
+    .sort((a, b) => b.n - a.n);
+
+  const finais = [];
+  for (const c of cores) {
+    const longe = !finais.some(f => Math.hypot(f.r - c.r, f.g - c.g, f.b - c.b) < 36);
+    if (longe) finais.push(c);
+    if (finais.length >= maxCores) break;
+  }
+  return finais.map(c => rgbParaHex(c.r, c.g, c.b));
+}
+
+function atualizarCoresDaLogo() {
+  const img = document.getElementById('aj-logo-preview');
+  if (!img) return;
+
+  const mini = document.getElementById('btn-cor-pela-logo-mini');
+  if (mini) mini.src = img.src;
+
+  const rodar = () => {
+    let vivas = [], escuras = [];
+    try {
+      vivas = extrairPaletaDeImagem(img, 6, 'viva');
+      escuras = extrairPaletaDeImagem(img, 6, 'escura');
+    } catch (e) { console.warn('Não foi possível ler as cores da logo.', e); }
+
+    const elD = document.getElementById('aj-cores-logo-destaque');
+    const elF = document.getElementById('aj-cores-logo-fundo');
+    if (elD) elD.innerHTML = vivas.length
+      ? vivas.map(h => corLogoSwatchHtml(h, 'destaque')).join('')
+      : '<span style="font-size:12px;color:#5E6E9E;">Nenhuma cor viva o bastante nesta logo.</span>';
+    if (elF) elF.innerHTML = escuras.length
+      ? escuras.map(h => corLogoSwatchHtml(h, 'fundo')).join('')
+      : '<span style="font-size:12px;color:#5E6E9E;">Nenhum tom escuro o bastante nesta logo.</span>';
+
+    marcarSwatchesLogoAtivos();
+  };
+  if (img.complete && img.naturalWidth) rodar();
+  else img.onload = rodar;
+}
+
+function toggleCoresDaLogo() {
+  const painel = document.getElementById('aj-cores-logo-painel');
+  const texto = document.getElementById('btn-cor-pela-logo-texto');
+  if (!painel) return;
+  const abrindo = painel.style.display === 'none';
+  painel.style.display = abrindo ? 'block' : 'none';
+  if (texto) texto.textContent = abrindo ? 'Ocultar Cores da Logo' : 'Escolher Cor pela Logo';
+  if (abrindo) atualizarCoresDaLogo(); // garante que está com as cores da logo atual
+}
+
+function selecionarCorLogo(hex, tipo) {
+  if (!_ajCoresPendente) _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
+  _ajCoresPendente[tipo] = hex;
+  _ajPaletaSelecionada = null; // a combinação deixou de ser exatamente uma paleta pronta
+  renderCoresGrid();
+}
+
+function marcarSwatchesLogoAtivos() {
+  document.querySelectorAll('[data-corlogo]').forEach(el => {
+    const tipo = el.dataset.tipo;
+    const cor = el.dataset.corlogo;
+    const ativo = !!(_ajCoresPendente && _ajCoresPendente[tipo] &&
+      _ajCoresPendente[tipo].toLowerCase() === cor.toLowerCase());
+    el.style.borderColor = ativo ? '#EBC531' : '#16295C';
+    el.style.boxShadow = ativo ? '0 0 0 2px rgba(235,197,49,0.35)' : 'none';
+  });
+}
+
+function atualizarPreviewCores() {
+  if (!_ajCoresPendente) return;
+  const fundoEl = document.getElementById('aj-preview-fundo');
+  const destaqueEl = document.getElementById('aj-preview-destaque');
+  const hexEl = document.getElementById('aj-preview-hex');
+  if (fundoEl) fundoEl.style.background = _ajCoresPendente.fundo;
+  if (destaqueEl) destaqueEl.style.background = _ajCoresPendente.destaque;
+  if (hexEl) hexEl.textContent = _ajCoresPendente.destaque.toUpperCase() + '  ·  ' + _ajCoresPendente.fundo.toUpperCase();
+}
+
+async function salvarCores() {
+  const st = document.getElementById('aj-cores-status');
+  const btn = document.getElementById('btn-salvar-aj-cores');
+  if (!_ajCoresPendente || !_ajCoresPendente.destaque || !_ajCoresPendente.fundo) {
+    st.style.color = '#e05555'; st.textContent = 'Escolha uma cor de destaque e uma de fundo.'; return;
+  }
+  const { destaque, fundo } = _ajCoresPendente;
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('barbearia').set({ corDestaque: destaque, corFundo: fundo }, { merge: true });
+    BARBEARIA.corDestaque = destaque;
+    BARBEARIA.corFundo = fundo;
+    try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
+    aplicarTema(BARBEARIA);
+    renderCoresGrid();
+    st.style.color = '#4caf50'; st.textContent = 'Cores salvas!';
+    showToast('Cores do site atualizadas.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+// ── Tabs ─────────────────────────────────────────
+function showTab(tab, el) {
+  // Injeta o tab de clientes do template na primeira vez
+  if (tab === 'clientes' && !document.getElementById('tab-clientes')) {
+    const tpl = document.getElementById('tpl-tab-clientes');
+    const clone = tpl.content.cloneNode(true);
+    document.querySelector('.admin-main').appendChild(clone);
+  }
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (el) el.classList.add('active');
+  const titles = { dashboard: 'Dashboard', agendamentos: 'Agendamentos', horarios: 'Horarios de Atendimento', servicos: 'Valores dos Serviços', datas: 'Datas Especiais', clientes: 'Clientes', ajustes: 'Ajustes' };
+  document.getElementById('page-title').textContent = titles[tab] || tab;
+  if (tab === 'horarios') carregarHorarios();
+  if (tab === 'servicos') renderServicosEditor();
+  if (tab === 'datas') carregarDatasEspeciais();
+  if (tab === 'clientes') renderClientes();
+  if (tab === 'ajustes') renderAjustesForm();
+  gerenciarFab(tab);
+  // Scroll para o topo no mobile
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function syncBottomNav(activeId) {
+  document.querySelectorAll('.bottom-nav-item').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(activeId);
+  if (el) el.classList.add('active');
+}
+
+// ── Agendamentos ─────────────────────────────────
+
+function loadAgendamentos() {
+  unsubscribe = db.collection('agendamentos').orderBy('criadoEm', 'desc').onSnapshot(snapshot => {
+    const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Detecta novos agendamentos após a primeira carga
+    if (_agendamentosKnownIds !== null) {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const a = { id: change.doc.id, ...change.doc.data() };
+          // Só notifica se foi criado há menos de 30s (evita notificar histórico no reload)
+          const criadoEm = a.criadoEm?.toDate ? a.criadoEm.toDate() : null;
+          const recente = !criadoEm || (Date.now() - criadoEm.getTime() < 30000);
+          if (recente) {
+            notificarNovoAgendamento(a);
+          }
+        }
+      });
+    } else {
+      // Primeira carga: registra IDs conhecidos
+      _agendamentosKnownIds = new Set(docs.map(d => d.id));
+    }
+
+    allAgendamentos = docs;
+    renderDashboard();
+    renderAgendamentosTable(allAgendamentos);
+  });
+}
+
+function clearDashFilter() {
+  document.getElementById('dash-filter-de').value = '';
+  document.getElementById('dash-filter-ate').value = '';
+  renderDashboard();
+}
+
+// Retorna a data local no formato YYYY-MM-DD (sem depender de UTC)
+function localDateStr(d) {
+  const date = d || new Date();
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function setDashFilterToday() {
+  const hoje = localDateStr();
+  document.getElementById('dash-filter-de').value = hoje;
+  document.getElementById('dash-filter-ate').value = hoje;
+  renderDashboard();
+}
+
+function setDashFilterWeek() {
+  const now = new Date();
+  const day = now.getDay(); // 0=dom
+  const monday = new Date(now); monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  document.getElementById('dash-filter-de').value = localDateStr(monday);
+  document.getElementById('dash-filter-ate').value = localDateStr(sunday);
+  renderDashboard();
+}
+
+function setDashFilterMonth() {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last  = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  document.getElementById('dash-filter-de').value = localDateStr(first);
+  document.getElementById('dash-filter-ate').value = localDateStr(last);
+  renderDashboard();
+}
+
+// Valor mostrado nas listas: agendamentos de cliente com plano aparecem como "Plano"
+function fmtValorAgd(a) {
+  if (atendimentoCobertoPorPlano(a)) return 'Plano';
+  const v = precoAgendamento(a);
+  if (v === 0 && /^Plano /.test(a.obs || '')) return 'Plano';
+  return 'R$' + v.toFixed(2).replace('.', ',');
+}
+
+// Pagamentos de planos (guardados em clientes/{tel}.planoPagamentos) entram no financeiro
+function pagamentosDePlanos() {
+  const out = [];
+  Object.entries(_clientesFirestore).forEach(([key, c]) => {
+    if (c && Array.isArray(c.planoPagamentos)) c.planoPagamentos.forEach(p => out.push({ ...p, key, nome: c.nome }));
+  });
+  return out;
+}
+function receitaDePlanos(de, ate) {
+  return pagamentosDePlanos()
+    .filter(p => p.data && !p.zerado && (!de || p.data >= de) && (!ate || p.data <= ate))
+    .reduce((s, p) => s + (Number(p.valor) || 0), 0);
+}
+
+// ── Horários disponíveis (dashboard) ──
+let _dispData = '';       // '' = hoje
+let _dispCfgEstado = 0;   // 0 = não carregou, 1 = carregando, 2 = pronto
+let _dispLivres = [];     // horários livres exibidos (para "Copiar livres")
+
+function dispCarregarConfig() {
+  _dispCfgEstado = 1;
+  return Promise.all([
+    db.collection('config').doc('horarios').get(),
+    db.collection('config').doc('datas_especiais').get(),
+  ]).then(([h, d]) => {
+    if (h.exists) {
+      const saved = h.data();
+      DIAS_SEMANA.forEach(dia => { horariosConfig[dia.key] = Object.assign({}, DEFAULT_HORARIOS[dia.key], saved[dia.key] || {}); });
+    }
+    datasEspeciais = d.exists ? (d.data() || {}) : {};
+  }).catch(() => {}).then(() => { _dispCfgEstado = 2; });
+}
+function dispDataAtual() { return _dispData || localDateStr(); }
+function dispEscolherData(v) { _dispData = v || ''; renderDisponibilidade(); }
+function dispMudarDia(delta) {
+  const [y, m, d] = dispDataAtual().split('-').map(Number);
+  const n = new Date(y, m - 1, d + delta);
+  _dispData = n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+  renderDisponibilidade();
+}
+// Configuração do dia: data especial vale mais que o horário da semana
+function dispConfigDoDia(iso) {
+  const esp = datasEspeciais[iso];
+  if (esp) {
+    if (esp.tipo === 'fechado') return { fechado: true, motivo: esp.desc || 'Data especial (fechado)' };
+    return { inicio: esp.inicio, fim: esp.fim, almoco: !!esp.almoco, almoco_inicio: esp.almoco_inicio, almoco_fim: esp.almoco_fim, especial: esp.desc || 'Data especial' };
+  }
+  const [y, m, d] = iso.split('-').map(Number);
+  const cfg = horariosConfig[DIAS_SEMANA[new Date(y, m - 1, d).getDay()].key];
+  if (!cfg || !cfg.ativo) return { fechado: true, motivo: 'Dia sem atendimento' };
+  return cfg;
+}
+function dispNormHora(h) {
+  const mt = /(\d{1,2}):(\d{2})/.exec(String(h || ''));
+  return mt ? mt[1].padStart(2, '0') + ':' + mt[2] : '';
+}
+function renderDisponibilidade() {
+  const grid = document.getElementById('disp-grid');
+  if (!grid) return;
+  const resumo = document.getElementById('disp-resumo');
+  const extra = document.getElementById('disp-extra');
+  if (_dispCfgEstado === 0) { dispCarregarConfig().then(renderDisponibilidade); }
+  if (_dispCfgEstado !== 2) { resumo.textContent = 'Carregando horários...'; return; }
+
+  const iso = dispDataAtual();
+  const inp = document.getElementById('disp-data');
+  if (inp && inp.value !== iso) inp.value = iso;
+  const [y, m, d] = iso.split('-').map(Number);
+  const diaNome = DIAS_SEMANA[new Date(y, m - 1, d).getDay()].label;
+  const rotuloDia = fmtDataBR(iso) + ' · ' + diaNome;
+  _dispLivres = [];
+  extra.textContent = '';
+
+  const cfg = dispConfigDoDia(iso);
+  const marcados = allAgendamentos.filter(a => a.data === iso && a.status !== 'cancelado');
+  if (cfg.fechado) {
+    grid.innerHTML = '';
+    resumo.innerHTML = '<strong style="color:#F1EAD6;">' + escPlano(rotuloDia) + '</strong> — <span style="color:#e05555;">Fechado</span> (' + escPlano(cfg.motivo) + ')';
+    return;
+  }
+  const temAlmoco = cfg.almoco && cfg.almoco_inicio && cfg.almoco_fim;
+  const slots = gerarSlots(cfg.inicio || '08:00', cfg.fim || '18:00', !!temAlmoco, cfg.almoco_inicio || '', cfg.almoco_fim || '');
+
+  const agora = new Date();
+  const hoje = localDateStr();
+  const agoraMin = agora.getHours() * 60 + agora.getMinutes();
+  const passou = h => iso < hoje || (iso === hoje && (parseInt(h.slice(0, 2)) * 60 + parseInt(h.slice(3))) <= agoraMin);
+
+  const porHora = {};
+  marcados.forEach(a => { const h = dispNormHora(a.horario); if (h) (porHora[h] = porHora[h] || []).push(a); });
+
+  let livres = 0, ocupados = 0;
+  grid.innerHTML = slots.map(h => {
+    const ags = porHora[h];
+    if (ags) {
+      ocupados++;
+      const nome = escPlano(String(ags[0].cliente || '—').trim().split(' ')[0]);
+      const tip = escPlano(ags.map(a => (a.cliente || '—') + ' · ' + (a.servico || '')).join('\n'));
+      return '<div title="' + tip + '" style="background:#3a2c08;border:1px solid #EBC531;border-radius:6px;padding:8px 6px;text-align:center;">' +
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;color:#EBC531;letter-spacing:.5px;">' + h + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:10px;color:#c9a94a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + nome + (ags.length > 1 ? ' +' + (ags.length - 1) : '') + '</div></div>';
+    }
+    if (passou(h)) {
+      return '<div style="background:#0C1838;border:1px solid #16295C;border-radius:6px;padding:8px 6px;text-align:center;">' +
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;color:#3d4d7a;text-decoration:line-through;">' + h + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:10px;color:#3d4d7a;">passou</div></div>';
+    }
+    livres++; _dispLivres.push(h);
+    return '<div style="background:#123a24;border:1px solid #1f9e54;border-radius:6px;padding:8px 6px;text-align:center;">' +
+      '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;color:#4cd984;letter-spacing:.5px;">' + h + '</div>' +
+      '<div style="font-family:\'Roboto\',sans-serif;font-size:10px;color:#2db866;">livre</div></div>';
+  }).join('');
+
+  resumo.innerHTML = '<strong style="color:#F1EAD6;">' + escPlano(rotuloDia) + '</strong> — ' +
+    '<strong style="color:#4cd984;">' + livres + ' livre' + (livres === 1 ? '' : 's') + '</strong> · ' +
+    '<strong style="color:#EBC531;">' + ocupados + ' ocupado' + (ocupados === 1 ? '' : 's') + '</strong>' +
+    ' · atendimento ' + escPlano(cfg.inicio || '') + ' às ' + escPlano(cfg.fim || '') +
+    (temAlmoco ? ' (almoço ' + escPlano(cfg.almoco_inicio) + '–' + escPlano(cfg.almoco_fim) + ')' : '') +
+    (cfg.especial ? ' · <span style="color:#EBC531;">' + escPlano(cfg.especial) + '</span>' : '');
+
+  // Agendamentos marcados em horário que não está na grade (ex.: atendimento avulso ou grade alterada depois)
+  const fora = Object.keys(porHora).filter(h => !slots.includes(h)).sort();
+  if (fora.length) {
+    extra.textContent = 'Também agendado fora da grade: ' + fora.map(h => h + ' (' + String(porHora[h][0].cliente || '—').trim().split(' ')[0] + ')').join(', ');
+  }
+}
+function dispCopiarLivres() {
+  if (!_dispLivres.length) { showToast('Não há horários livres nesse dia.'); return; }
+  const iso = dispDataAtual();
+  const [y, m, d] = iso.split('-').map(Number);
+  const txt = 'Horários livres em ' + fmtDataBR(iso).slice(0, 5) + ' (' + DIAS_SEMANA[new Date(y, m - 1, d).getDay()].label.split('-')[0] + '): ' + _dispLivres.join(', ');
+  const ok = () => showToast('Horários livres copiados.');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, () => prompt('Copie o texto:', txt));
+  else prompt('Copie o texto:', txt);
+}
+
+function renderDashboard() {
+  const hoje = localDateStr();
+  try { renderDisponibilidade(); } catch (e) { console.warn(e); }
+  const filterDe  = document.getElementById('dash-filter-de').value;
+  const filterAte = document.getElementById('dash-filter-ate').value;
+
+  // Considera filtro ativo se ao menos um campo preenchido
+  const hasFilter = !!(filterDe || filterAte);
+  // Efetivo: se só um lado preenchido, o outro assume o mesmo valor
+  const efDe  = filterDe  || filterAte;
+  const efAte = filterAte || filterDe;
+
+  // Highlight nas bordas dos inputs quando ativos
+  const styleAtivo  = 'background:#0F1F45;border:1px solid #EBC531;border-radius:6px;padding:8px 12px;outline:none;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:13px;cursor:pointer;color-scheme:dark;';
+  const styleNormal = 'background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 12px;outline:none;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:13px;cursor:pointer;color-scheme:dark;';
+  document.getElementById('dash-filter-de').style.cssText  = filterDe  ? styleAtivo : styleNormal;
+  document.getElementById('dash-filter-ate').style.cssText = filterAte ? styleAtivo : styleNormal;
+
+  // ── Label do filtro ──────────────────────────────
+  const labelEl = document.getElementById('dash-filter-label');
+  if (hasFilter) {
+    const fmtDe  = efDe  ? efDe.split('-').reverse().join('/')  : '—';
+    const fmtAte = efAte ? efAte.split('-').reverse().join('/') : '—';
+    labelEl.textContent = efDe === efAte ? fmtDe : (fmtDe + ' — ' + fmtAte);
+    labelEl.style.color = '#EBC531';
+  } else {
+    labelEl.textContent = '';
+  }
+
+  // ── Filtragem por intervalo ──────────────────────
+  const agendamentosNoRange = hasFilter
+    ? allAgendamentos.filter(a => a.data >= efDe && a.data <= efAte)
+    : [];
+
+  // ── Cards ────────────────────────────────────────
+  const isSingleDay = hasFilter && efDe === efAte;
+
+  document.getElementById('stat-hoje').textContent = hasFilter
+    ? agendamentosNoRange.length
+    : allAgendamentos.filter(a => a.data === hoje).length;
+  document.getElementById('stat-hoje-label').textContent = hasFilter
+    ? (isSingleDay ? 'Agendamentos no Dia' : 'Agendamentos no Período')
+    : 'Agendamentos Hoje';
+
+  document.getElementById('stat-agendados').textContent = hasFilter
+    ? agendamentosNoRange.filter(a => a.status === 'agendado').length
+    : allAgendamentos.filter(a => a.status === 'agendado').length;
+  document.getElementById('stat-agendados-label').textContent = hasFilter ? 'Agendados no Período' : 'Agendados';
+
+  document.getElementById('stat-confirmados').textContent = hasFilter
+    ? agendamentosNoRange.filter(a => a.status === 'confirmado').length
+    : allAgendamentos.filter(a => a.status === 'confirmado').length;
+  document.getElementById('stat-confirmados-label').textContent = hasFilter ? 'Confirmados no Período' : 'Confirmados';
+
+  // ── Card de Receita do Período (aparece só com filtro) ──
+  const cardReceitaDia = document.getElementById('stat-card-receita-dia');
+  if (hasFilter) {
+    const receitaServicos = agendamentosNoRange
+      .filter(a => a.status === 'concluido')
+      .reduce((acc, a) => acc + valorReceita(a), 0);
+    const receitaPlanosPeriodo = receitaDePlanos(efDe, efAte);
+    const receitaPeriodo = receitaServicos + receitaPlanosPeriodo;
+    document.getElementById('stat-receita-dia').textContent = 'R$' + receitaPeriodo.toFixed(2).replace('.', ',');
+    const baseLabel = isSingleDay
+      ? 'Receita de ' + efDe.split('-').slice(1).reverse().join('/')
+      : 'Receita do Período';
+    document.getElementById('stat-receita-dia-label').textContent = receitaPlanosPeriodo > 0
+      ? baseLabel + ' (inclui planos: R$' + receitaPlanosPeriodo.toFixed(2).replace('.', ',') + ')'
+      : baseLabel;
+    cardReceitaDia.style.display = '';
+  } else {
+    cardReceitaDia.style.display = 'none';
+  }
+
+  // ── Tabela ───────────────────────────────────────
+  const recent = hasFilter ? agendamentosNoRange : allAgendamentos.slice(0, 8);
+  const sectionTitle = document.getElementById('recent-section-title');
+  if (sectionTitle) {
+    sectionTitle.textContent = hasFilter
+      ? (isSingleDay ? 'Agendamentos do Dia' : 'Agendamentos do Período')
+      : 'Agendamentos Recentes';
+  }
+
+  const el = document.getElementById('recent-list');
+  if (!recent.length) {
+    el.innerHTML = '<p style="color:#5E6E9E;padding:20px;font-family:Oswald,sans-serif;letter-spacing:1px;">Nenhum agendamento encontrado para o período selecionado.</p>';
+    return;
+  }
+  el.innerHTML = `<table class="admin-table">
+    <thead><tr><th>Cliente</th><th>Servico</th><th>Data</th><th>Horario</th><th>Valor</th><th>Status</th></tr></thead>
+    <tbody>${recent.map(a => `<tr>
+      <td>${a.cliente||'--'}</td>
+      <td>${a.servico||'--'}</td>
+      <td>${a.data ? formatDate(a.data) : '--'}</td>
+      <td>${a.horario||'--'}</td>
+      <td style="color:var(--gold);font-family:var(--font-display);font-size:16px;">${fmtValorAgd(a)}</td>
+      <td>${badgeHTML(a.status)}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function renderAgendamentosTable(data) {
+  const tbody = document.getElementById('agendamentos-body');
+  if (!tbody) return;
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#5E6E9E;padding:32px;">Nenhum agendamento encontrado.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(a => `<tr data-id="${a.id}" ${a.origem === 'avulso' ? 'style="border-left:2px solid rgba(235,197,49,0.3);"' : ''}>
+    <td data-label="Cliente"><strong style="color:var(--white)">${a.cliente||'--'}</strong>${a.origem==='avulso' ? ' <span style="font-family:\'Oswald\',sans-serif;font-size:8px;letter-spacing:1.5px;background:rgba(235,197,49,0.1);color:#EBC531;border:1px solid rgba(235,197,49,0.25);padding:2px 6px;border-radius:3px;vertical-align:middle;">AVULSO</span>' : ''}</td>
+    <td data-label="WhatsApp"><a href="https://wa.me/55${(a.telefone||'').replace(/\D/g,'')}" target="_blank" style="color:var(--gold);text-decoration:none;">${a.telefone||'--'}</a></td>
+    <td data-label="Serviço">${a.servico||'--'}</td>
+    <td data-label="Data">${a.data ? formatDate(a.data) : '--'}</td>
+    <td data-label="Horário">${a.horario||'--'}</td>
+    <td data-label="Valor" style="color:var(--gold);font-family:var(--font-display);font-size:18px;">${fmtValorAgd(a)}</td>
+    <td data-label="Status">${badgeHTML(a.status)}</td>
+    <td>
+      <div class="action-btns">
+        ${a.status==='agendado' ? `<button class="btn-action btn-confirmar" onclick="updateStatus('${a.id}','confirmado')">Confirmar</button>` : ''}
+        ${a.status==='confirmado' ? `<button class="btn-action btn-concluir" onclick="updateStatus('${a.id}','concluido')">Concluir</button>` : ''}
+        ${['agendado','confirmado'].includes(a.status) ? `<button class="btn-action btn-cancelar" onclick="updateStatus('${a.id}','cancelado')">Cancelar</button>` : ''}
+        <a class="btn-action btn-whats" href="https://wa.me/55${(a.telefone||'').replace(/\D/g,'')}" target="_blank">WhatsApp</a>
+        <button class="btn-action btn-excluir" onclick="deleteAgendamento('${a.id}')">Excluir</button>
+      </div>
+    </td>
+  </tr>`).join('');
+}
+
+function applyFilters() {
+  const status = document.getElementById('filter-status').value;
+  const date   = document.getElementById('filter-date').value;
+  const search = document.getElementById('filter-search').value.toLowerCase();
+  let f = allAgendamentos;
+  if (status) f = f.filter(a => a.status === status);
+  if (date)   f = f.filter(a => a.data === date);
+  if (search) f = f.filter(a => (a.cliente||'').toLowerCase().includes(search) || (a.servico||'').toLowerCase().includes(search));
+  renderAgendamentosTable(f);
+}
+
+// Mensagem enviada ao cliente (WhatsApp) para cada mudança de status
+const MSG_STATUS_WPP = {
+  confirmado: { titulo: 'Confirmar Agendamento',  tipo: 'de confirmação' },
+  concluido:  { titulo: 'Concluir Atendimento',   tipo: 'de agradecimento' },
+  cancelado:  { titulo: 'Cancelar Agendamento',   tipo: 'de cancelamento' },
+};
+
+function mensagemStatusWpp(ag, status) {
+  const primeiroNome = (ag.cliente || 'Cliente').split(' ')[0];
+  const detalhes = [
+    '*Detalhes:*',
+    '*Serviço:* ' + (ag.servico || '--'),
+    '*Data:* ' + (ag.data ? formatDate(ag.data) : '--'),
+    '*Horário:* ' + (ag.horario || '--'),
+  ];
+  if (status === 'confirmado') {
+    return [
+      'Olá, *' + primeiroNome + '*!', '',
+      'Seu agendamento na *Wellisson Barber* foi *confirmado*!', '',
+      ...detalhes,
+      '*Valor:* R$' + (ag.preco || 0).toFixed(2).replace('.', ','), '',
+      'Te esperamos! Qualquer dúvida é só chamar.',
+    ].join('\n');
+  }
+  if (status === 'concluido') {
+    return [
+      'Olá, *' + primeiroNome + '*!', '',
+      'Muito obrigado por escolher a *Wellisson Barber*! Foi um prazer te atender.', '',
+      'Esperamos te ver de novo em breve. Quando quiser agendar o próximo horário, é só chamar!',
+    ].join('\n');
+  }
+  return [
+    'Olá, *' + primeiroNome + '*!', '',
+    'Informamos que o seu agendamento na *Wellisson Barber* foi *cancelado*.', '',
+    ...detalhes, '',
+    'Se quiser remarcar, é só nos chamar por aqui. Qualquer dúvida, estamos à disposição!',
+  ].join('\n');
+}
+
+function updateStatus(id, status) {
+  const cfg = MSG_STATUS_WPP[status];
+  if (cfg) {
+    // Pergunta se quer avisar o cliente pelo WhatsApp (confirmar / concluir / cancelar)
+    const ag = allAgendamentos.find(a => a.id === id);
+    const nome = ag ? (ag.cliente || 'cliente') : 'cliente';
+    document.getElementById('confirm-modal-titulo').textContent = cfg.titulo;
+    document.getElementById('confirm-modal-tipo').textContent = cfg.tipo;
+    document.getElementById('confirm-modal-nome').textContent = nome;
+    document.getElementById('confirm-modal').style.display = 'flex';
+    document.getElementById('confirm-modal-sim').onclick = function() {
+      fecharConfirmModal();
+      salvarStatus(id, status, true);
+    };
+    document.getElementById('confirm-modal-nao').onclick = function() {
+      fecharConfirmModal();
+      salvarStatus(id, status, false);
+    };
+    return;
+  }
+  salvarStatus(id, status, false);
+}
+
+function fecharConfirmModal() {
+  document.getElementById('confirm-modal').style.display = 'none';
+}
+
+function salvarStatus(id, status, enviarWpp) {
+  // Salva primeiro (a gravação já sai no clique) e só depois abre o WhatsApp.
+  // O WhatsApp é aberto direto no clique do usuário: iOS Safari bloqueia window.open dentro de .then() (async).
+  db.collection('agendamentos').doc(id).update({ status, atualizadoEm: firebase.firestore.FieldValue.serverTimestamp() })
+    .catch(() => alert('Erro ao atualizar status.'));
+  if (enviarWpp && MSG_STATUS_WPP[status]) {
+    const ag = allAgendamentos.find(a => a.id === id);
+    const phone = ag && ag.telefone ? ag.telefone.replace(/\D/g, '') : '';
+    if (!phone) { showToast('Cliente sem WhatsApp cadastrado: mensagem não enviada.'); return; }
+    const url = 'https://wa.me/55' + phone + '?text=' + encodeURIComponent(mensagemStatusWpp(ag, status));
+    // Nova aba/app: o painel continua aberto e a gravação não é interrompida
+    if (!window.open(url, '_blank')) window.location.href = url;
+  }
+}
+
+function deleteAgendamento(id) {
+  if (!confirm('Excluir este agendamento? Nao pode ser desfeito.')) return;
+  db.collection('agendamentos').doc(id).delete().catch(() => alert('Erro ao excluir.'));
+}
+
+function abrirModalConcluirTodos() {
+  const pendentes = allAgendamentos.filter(a => ['agendado','confirmado'].includes(a.status));
+  if (!pendentes.length) {
+    alert('Nenhum agendamento agendado ou confirmado para concluir.');
+    return;
+  }
+  document.getElementById('concluir-todos-count').textContent = pendentes.length;
+  document.getElementById('concluir-todos-modal').style.display = 'flex';
+}
+
+function fecharModalConcluirTodos() {
+  document.getElementById('concluir-todos-modal').style.display = 'none';
+}
+
+async function confirmarConcluirTodos() {
+  fecharModalConcluirTodos();
+  const btn = document.querySelector('[onclick="abrirModalConcluirTodos()"]');
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Concluindo...';
+  btn.disabled = true;
+
+  const pendentes = allAgendamentos.filter(a => ['agendado','confirmado'].includes(a.status));
+  try {
+    const batch = db.batch();
+    pendentes.forEach(a => {
+      batch.update(db.collection('agendamentos').doc(a.id), { status: 'concluido',
+        atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    await batch.commit();
+  } catch(e) {
+    alert('Erro ao concluir agendamentos: ' + (e.message || e));
+  } finally {
+    btn.textContent = textoOriginal;
+    btn.disabled = false;
+  }
+}
+
+function exportCSV() {
+  const rows = [['Cliente','WhatsApp','Servico','Data','Horario','Valor (R$)','Status','Obs']];
+  allAgendamentos.forEach(a => rows.push([a.cliente||'',a.telefone||'',a.servico||'',a.data||'',a.horario||'',(a.preco||0).toFixed(2).replace('.',','),a.status||'',a.obs||'']));
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `agendamentos_vr_${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Horários ─────────────────────────────────────
+
+
+
+async function carregarHorarios() {
+  try {
+    const doc = await db.collection('config').doc('horarios').get();
+    if (doc.exists) {
+      const saved = doc.data();
+      // Merge saved data preserving new lunch fields from DEFAULT if missing
+      DIAS_SEMANA.forEach(dia => {
+        horariosConfig[dia.key] = Object.assign({}, DEFAULT_HORARIOS[dia.key], saved[dia.key] || {});
+      });
+    }
+  } catch(e) {}
+  renderHorariosGrid();
+}
+
+function gerarSlots(inicio, fim, almoco, almoco_inicio, almoco_fim) {
+  const slots = [];
+  let [h, m] = inicio.split(':').map(Number);
+  const [hf, mf] = fim.split(':').map(Number);
+  const fimMin = hf * 60 + mf;
+  const almocoInicioMin = almoco ? (parseInt(almoco_inicio.split(':')[0]) * 60 + parseInt(almoco_inicio.split(':')[1])) : -1;
+  const almocoFimMin   = almoco ? (parseInt(almoco_fim.split(':')[0])   * 60 + parseInt(almoco_fim.split(':')[1]))   : -1;
+  while (h * 60 + m < fimMin) {
+    const cur = h * 60 + m;
+    if (!almoco || cur < almocoInicioMin || cur >= almocoFimMin) {
+      slots.push(String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0'));
+    }
+    m += 30; if (m >= 60) { h++; m -= 60; }
+  }
+  return slots;
+}
+
+function previewSlots(inicio, fim, almoco, almoco_inicio, almoco_fim) {
+  const s = gerarSlots(inicio, fim, almoco, almoco_inicio, almoco_fim);
+  if (!s.length) return '--';
+  if (s.length <= 3) return s.join(' - ');
+  return s[0] + ' - ' + s[1] + ' - ... - ' + s[s.length-1] + ' (' + s.length + ' horarios)';
+}
+
+function renderHorariosGrid() {
+  const grid = document.getElementById('horarios-grid');
+  if (!grid) return;
+  grid.innerHTML = DIAS_SEMANA.map(dia => {
+    const cfg = horariosConfig[dia.key];
+    const on  = cfg.ativo;
+    const alOn = cfg.almoco || false;
+    return `<div style="
+        background:#0C1838; border:1px solid ${on ? '#2C4E9E' : '#16295C'};
+        border-radius:6px; padding:16px 20px;
+        display:flex; flex-direction:column; gap:14px; transition:border .2s;">
+
+      <!-- Linha principal: toggle + horários de atendimento -->
+      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:170px;" onclick="toggleDia('${dia.key}')">
+          <div style="width:44px;height:24px;border-radius:12px;background:${on ? '#5E6E9E' : '#1B3168'};position:relative;transition:background .2s;flex-shrink:0;">
+            <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${on ? '23px' : '3px'};transition:left .2s;"></div>
+          </div>
+          <span style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:1px;color:${on ? '#F1EAD6' : '#5E6E9E'};transition:color .2s;">${dia.label}</span>
+        </label>
+
+        <div style="display:flex;align-items:center;gap:12px;${on ? '' : 'opacity:.3;pointer-events:none;'}">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Abertura</span>
+            <input type="time" id="inicio-${dia.key}" value="${cfg.inicio}"
+              style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:8px 12px;color:#F1EAD6;font-size:14px;outline:none;"
+              onchange="updateHorario('${dia.key}')"/>
+          </div>
+          <span style="color:#2C4E9E;font-size:20px;margin-top:14px;">&#8594;</span>
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Fechamento</span>
+            <input type="time" id="fim-${dia.key}" value="${cfg.fim}"
+              style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:8px 12px;color:#F1EAD6;font-size:14px;outline:none;"
+              onchange="updateHorario('${dia.key}')"/>
+          </div>
+        </div>
+
+        <div style="margin-left:auto;${on ? '' : 'opacity:.3;'}">
+          <span style="font-size:11px;color:#7183B4;font-family:'Oswald',sans-serif;letter-spacing:1px;">Horarios: </span>
+          <span style="font-size:12px;color:#B4BEDC;font-family:'Roboto',sans-serif;" id="preview-${dia.key}">${previewSlots(cfg.inicio, cfg.fim, cfg.almoco, cfg.almoco_inicio, cfg.almoco_fim)}</span>
+        </div>
+      </div>
+
+      <!-- Linha de almoço -->
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 14px;border-radius:5px;background:#0A1330;border:1px solid ${alOn ? '#233F80' : '#122452'};${on ? '' : 'opacity:.3;pointer-events:none;'}">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;min-width:170px;" onclick="toggleAlmoco('${dia.key}')">
+          <div style="width:36px;height:20px;border-radius:10px;background:${alOn ? '#5E6E9E' : '#1B3168'};position:relative;transition:background .2s;flex-shrink:0;">
+            <div style="width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${alOn ? '19px' : '3px'};transition:left .2s;"></div>
+          </div>
+          <span style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:${alOn ? '#F1EAD6' : '#5E6E9E'};transition:color .2s;">Intervalo de Almoço</span>
+        </label>
+
+        <div style="display:flex;align-items:center;gap:10px;${alOn ? '' : 'opacity:.3;pointer-events:none;'}">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Início pausa</span>
+            <input type="time" id="almoco-inicio-${dia.key}" value="${cfg.almoco_inicio || '12:00'}"
+              style="background:#0F1F45;border:1px solid #16295C;border-radius:4px;padding:6px 10px;color:#F1EAD6;font-size:13px;outline:none;"
+              onchange="updateHorario('${dia.key}')"/>
+          </div>
+          <span style="color:#2C4E9E;font-size:16px;margin-top:14px;">&#8594;</span>
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Fim pausa</span>
+            <input type="time" id="almoco-fim-${dia.key}" value="${cfg.almoco_fim || '13:00'}"
+              style="background:#0F1F45;border:1px solid #16295C;border-radius:4px;padding:6px 10px;color:#F1EAD6;font-size:13px;outline:none;"
+              onchange="updateHorario('${dia.key}')"/>
+          </div>
+          <span style="font-size:11px;color:#7183B4;font-family:'Roboto',sans-serif;margin-top:14px;">(bloqueado para clientes)</span>
+        </div>
+      </div>
+
+    </div>`;
+  }).join('');
+}
+
+function toggleDia(key) {
+  horariosConfig[key].ativo = !horariosConfig[key].ativo;
+  renderHorariosGrid();
+}
+
+function toggleAlmoco(key) {
+  horariosConfig[key].almoco = !horariosConfig[key].almoco;
+  renderHorariosGrid();
+}
+
+function updateHorario(key) {
+  const inicio        = document.getElementById('inicio-' + key).value;
+  const fim           = document.getElementById('fim-' + key).value;
+  const almocoInicio  = document.getElementById('almoco-inicio-' + key).value;
+  const almocoFim     = document.getElementById('almoco-fim-' + key).value;
+  horariosConfig[key].inicio        = inicio;
+  horariosConfig[key].fim           = fim;
+  horariosConfig[key].almoco_inicio = almocoInicio;
+  horariosConfig[key].almoco_fim    = almocoFim;
+  const prev = document.getElementById('preview-' + key);
+  if (prev) prev.textContent = previewSlots(inicio, fim, horariosConfig[key].almoco, almocoInicio, almocoFim);
+}
+
+async function salvarHorarios() {
+  const btn = document.getElementById('btn-salvar-horarios');
+  const st  = document.getElementById('horarios-status');
+  btn.textContent = 'Salvando...';
+  btn.disabled = true;
+  try {
+    await db.collection('config').doc('horarios').set({ ...horariosConfig });
+    st.textContent = 'Salvo com sucesso!';
+    st.style.color = '#F1EAD6';
+    setTimeout(() => { st.textContent = ''; }, 3000);
+  } catch(e) {
+    st.textContent = 'Erro ao salvar.';
+    st.style.color = '#b03030';
+  }
+  btn.textContent = 'Salvar Horarios';
+  btn.disabled = false;
+}
+
+// ── CLIENTES ─────────────────────────────────────
+
+
+async function carregarClientesFirestore() {
+  try {
+    const snap = await db.collection('clientes').get();
+    snap.forEach(doc => { _clientesFirestore[doc.id] = doc.data(); });
+    // O plano do cliente influencia o valor mostrado: redesenha as telas com os dados já carregados
+    try { renderDashboard(); applyFilters(); } catch (e) {}
+  } catch(e) { console.warn('Erro ao carregar clientes:', e); }
+}
+
+function buildClientMap() {
+  const map = {};
+  allAgendamentos.forEach(a => {
+    const key = (a.telefone || '').replace(/\D/g, '') || a.cliente || 'desconhecido';
+    if (!map[key]) {
+      map[key] = {
+        key,
+        nome: a.cliente || '—',
+        telefone: a.telefone || '—',
+        nascimento: '',
+        agendamentos: [],
+      };
+    }
+    if (a.cliente) map[key].nome = a.cliente;
+    map[key].agendamentos.push(a);
+  });
+  // Mescla dados do Firestore (nascimento, nome atualizado)
+  Object.keys(_clientesFirestore).forEach(key => {
+    const fs = _clientesFirestore[key];
+    if (!map[key]) {
+      map[key] = { key, nome: fs.nome || '—', telefone: fs.telefone || key, nascimento: fs.nascimento || '', agendamentos: [] };
+    } else {
+      if (fs.nascimento) map[key].nascimento = fs.nascimento;
+      if (fs.nome) map[key].nome = fs.nome;
+    }
+  });
+  return map;
+}
+
+function calcClientStats(agendamentos) {
+  const concluidos = agendamentos.filter(a => a.status === 'concluido');
+  const pagos      = concluidos.filter(a => !a.receitaZerada && !atendimentoCobertoPorPlano(a)); // fora os do plano e os já zerados
+  const gastoTotal = pagos.reduce((s, a) => s + precoAgendamento(a), 0);
+  const ticket     = pagos.length ? gastoTotal / pagos.length : 0;
+  const servicoMap = {};
+  agendamentos.forEach(a => {
+    if (!a.servico) return;
+    servicoMap[a.servico] = (servicoMap[a.servico] || 0) + 1;
+  });
+  const servicoFavorito = Object.entries(servicoMap).sort((a, b) => b[1] - a[1])[0];
+  const datas = agendamentos.map(a => a.data).filter(Boolean).sort();
+  const ultimaVisita = datas[datas.length - 1];
+  return { concluidos: concluidos.length, pagos: pagos.length, total: agendamentos.length, gastoTotal, ticket, servicoMap, servicoFavorito, ultimaVisita };
+}
+
+function fmtNascimento(nasc) {
+  if (!nasc) return '';
+  const [y, m, d] = nasc.split('-');
+  return d + '/' + m + '/' + y;
+}
+
+function isAniversarioAmanha(nascimento) {
+  if (!nascimento) return false;
+  const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
+  const [, m, d] = nascimento.split('-');
+  return parseInt(m) === (amanha.getMonth() + 1) && parseInt(d) === amanha.getDate();
+}
+
+// Mensagem de parabéns enviada ao aniversariante (WhatsApp)
+function mensagemAniversario(nomeCompleto) {
+  const primeiro = String(nomeCompleto || '').trim().split(' ')[0];
+  return 'Olá ' + primeiro + '! Amanhã é seu aniversário e a Wellisson Barber deseja um feliz aniversário! ' +
+    'Para comemorar, você ganha um serviço extra de cortesia, à sua escolha: lavagem ou sobrancelha. ' +
+    'É só agendar seu horário e escolher o extra no dia do atendimento. Feliz aniversário!';
+}
+
+function renderAniversariantesBanner(clientes) {
+  const banner = document.getElementById('aniversariantes-banner');
+  const lista  = document.getElementById('aniversariantes-lista');
+  if (!banner || !lista) return;
+  const aniversariantes = clientes.filter(c => isAniversarioAmanha(c.nascimento));
+  if (!aniversariantes.length) { banner.style.display = 'none'; return; }
+  banner.style.display = 'block';
+  lista.innerHTML = aniversariantes.map(c => {
+    const tel = (c.telefone || '').replace(/\D/g, '');
+    const msg = encodeURIComponent(mensagemAniversario(c.nome));
+    return `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 14px;background:#201500;border:1px solid #3a2800;border-radius:6px;">
+      
+      <div style="flex:1;">
+        <div style="font-family:'Oswald',sans-serif;font-size:14px;color:#F1EAD6;letter-spacing:1px;">${c.nome}</div>
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#EBC531;">Aniversário amanhã · ${fmtNascimento(c.nascimento)}</div>
+      </div>
+      ${tel ? `<a href="https://wa.me/55${tel}?text=${msg}" target="_blank"
+        style="background:#1a2e1a;border:1px solid #2a4a2a;color:#4caf50;padding:8px 16px;border-radius:6px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;white-space:nowrap;">
+        Enviar Parabens →
+      </a>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function cadastrarClienteManual() {
+  const nome  = (document.getElementById('cad-nome')?.value || '').trim();
+  const tel   = (document.getElementById('cad-tel')?.value  || '').replace(/\D/g, '');
+  const nasc  = (document.getElementById('cad-nasc')?.value || '').trim();
+  const st    = document.getElementById('cad-status');
+  if (!nome || !tel) { if(st) { st.textContent = 'Nome e telefone são obrigatórios.'; st.style.color='#b03030'; } return; }
+  if(st) { st.textContent = 'Salvando...'; st.style.color = '#94A4CC'; }
+  try {
+    const data = { nome, telefone: tel, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
+    if (nasc) data.nascimento = nasc;
+    await db.collection('clientes').doc(tel).set({ ...data }, { merge: true });
+    _clientesFirestore[tel] = { ...(_clientesFirestore[tel] || {}), ...data };
+    if(st) { st.textContent = 'Cliente salvo!'; st.style.color = '#4caf50'; }
+    document.getElementById('cad-nome').value = '';
+    document.getElementById('cad-tel').value  = '';
+    document.getElementById('cad-nasc').value = '';
+    setTimeout(() => { if(st) st.textContent = ''; }, 3000);
+    renderClientes();
+  } catch(e) {
+    if(st) { st.textContent = 'Erro ao salvar.'; st.style.color = '#b03030'; }
+  }
+}
+
+
+
+// ══════════════════════════════════════════════════
+//  PLANOS MENSAIS
+//  Guardados em clientes/{telefone}: plano, planoPagoEm, planoVenceEm
+// ══════════════════════════════════════════════════
+const PLANOS_ADMIN = [
+  { id: 'barba',         nome: 'Barba',         preco: 50 },
+  { id: 'simples',       nome: 'Simples',       preco: 50 },
+  { id: 'intermediario', nome: 'Intermediário', preco: 90 },
+  { id: 'senior',        nome: 'Senior',        preco: 130 },
+  { id: 'neto',          nome: 'Neto Gostoso',  preco: 0, vitalicio: true }, // só no painel admin
+];
+// Plano vitalício: sem cobrança nem vencimento (usa uma data-limite bem distante só para os cálculos)
+const VENCIMENTO_VITALICIO = '2099-12-31';
+function planoVitalicio(id) { return !!planoDados(id).vitalicio; }
+function vencimentoDoPlano(id, pagoISO) { return planoVitalicio(id) ? VENCIMENTO_VITALICIO : somarUmMes(pagoISO); }
+function vencimentoTroca(c, novoId, modo, dataISO) {
+  if (planoVitalicio(novoId)) return VENCIMENTO_VITALICIO;
+  if (modo === 'manter' && !planoVitalicio(c.plano)) return c.planoVenceEm;
+  return somarUmMes(dataISO);
+}
+function planoDados(id) { return PLANOS_ADMIN.find(p => p.id === id) || { id, nome: id || '—', preco: 0 }; }
+function escPlano(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function chaveTelefone(raw) { return String(raw || '').replace(/\D/g, '').replace(/^55/, ''); }
+function hojeISOAdmin() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function fmtDataBR(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return d + '/' + m + '/' + y;
+}
+function fmtMoedaPlano(v) { return 'R$' + Number(v).toFixed(2).replace('.', ','); }
+// Mesmo dia do mês seguinte (se o mês seguinte for mais curto, usa o último dia dele)
+function somarUmMes(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  let ny = y, nm = m + 1;
+  if (nm > 12) { nm = 1; ny++; }
+  const ultimoDia = new Date(ny, nm, 0).getDate();
+  const nd = Math.min(d, ultimoDia);
+  return ny + '-' + String(nm).padStart(2, '0') + '-' + String(nd).padStart(2, '0');
+}
+function diasEntreISO(aISO, bISO) {
+  const [ay, am, ad] = aISO.split('-').map(Number);
+  const [by, bm, bd] = bISO.split('-').map(Number);
+  return Math.round((new Date(by, bm - 1, bd) - new Date(ay, am - 1, ad)) / 86400000);
+}
+// { tipo: 'ativo' | 'hoje' | 'vencido', dias }
+function statusPlano(venceISO) {
+  const dif = diasEntreISO(hojeISOAdmin(), venceISO); // >0 futuro, 0 hoje, <0 atrasado
+  if (dif === 0) return { tipo: 'hoje', dias: 0 };
+  if (dif < 0)   return { tipo: 'vencido', dias: -dif };
+  return { tipo: 'ativo', dias: dif };
+}
+function mensagemCobrancaPlano(nomeCompleto, planoId, venceISO) {
+  const primeiro = String(nomeCompleto || '').trim().split(' ')[0];
+  const p = planoDados(planoId);
+  const st = statusPlano(venceISO);
+  const quando = st.tipo === 'vencido' ? 'venceu em ' + fmtDataBR(venceISO) : 'vence hoje';
+  return 'Olá ' + primeiro + '! Passando para lembrar que o seu plano ' + p.nome + ' da Wellisson Barber (' +
+    fmtMoedaPlano(p.preco) + '/mês) ' + quando + '. Para renovar, é só realizar o pagamento e nos avisar por aqui. Obrigado!';
+}
+// Atualiza a cópia local da lista de pagamentos (sem duplicar o mesmo pagamento)
+function somarPagamentoLocal(cliente, pag) {
+  const lista = Array.isArray(cliente && cliente.planoPagamentos) ? cliente.planoPagamentos.slice() : [];
+  if (!lista.some(p => !p.encerradoEm && p.data === pag.data && p.valor === pag.valor && p.plano === pag.plano)) lista.push(pag);
+  return lista;
+}
+// Serviços incluídos em cada plano, pelo nome gravado no agendamento (mesma regra do site)
+const COBERTURA_PLANO_NOMES = {
+  barba:         ['Barba'],
+  simples:       ['Corte'],
+  intermediario: ['Corte'],
+  senior:        ['Corte', 'Barba', 'Corte + Barba'],
+  neto:          ['Corte'],
+};
+// Períodos de plano pagos pelo cliente: do dia do pagamento até o vencimento
+function periodosDoPlano(c) {
+  const ps = [];
+  // Pagamentos de um plano já removido ficam no histórico, mas só cobrem atendimentos antes da remoção (encerradoEm)
+  const legado = dataRemocaoPlano(c); // remoções antigas, sem data gravada no pagamento
+  (Array.isArray(c.planoPagamentos) ? c.planoPagamentos : []).forEach(p => {
+    if (p.data) ps.push({ plano: p.plano || c.plano, ini: p.data, fim: p.fim || somarUmMes(p.data), ate: p.encerradoEm || (!c.plano ? legado : '') });
+  });
+  if (c.plano && c.planoPagoEm && c.planoVenceEm && !ps.some(x => x.ini === c.planoPagoEm && !x.ate)) {
+    ps.push({ plano: c.plano, ini: c.planoPagoEm, fim: c.planoVenceEm, ate: '' });
+  }
+  return ps;
+}
+// O atendimento foi feito por cliente com plano válido na data e o serviço é coberto pelo plano?
+// Nesse caso ele não entra como receita (a receita é a mensalidade do plano).
+// Agendamento gravado como plano na hora da reserva (preço 0 + obs "Plano ...") continua sendo plano para sempre,
+// mesmo que o cliente saia do plano depois.
+function agendamentoGravadoComoPlano(a) {
+  return !!a && (Number(a.preco) || 0) === 0 && /^Plano /.test(a.obs || '');
+}
+// Limites de uso por plano (mesma regra do site): qtd de atendimentos cobertos por 'periodo' ou 'semana'
+const LIMITES_PLANO_ADMIN = {
+  barba:   { qtd: 1, por: 'semana' },
+  simples: { qtd: 2, por: 'periodo' },
+  neto:    { qtd: 1, por: 'mes' }, // 1 corte por mês do calendário
+};
+function semanaDeISO(dataISO) {
+  const [y, m, d] = dataISO.split('-').map(Number);
+  const dow = (new Date(y, m - 1, d).getDay() + 6) % 7; // segunda = 0
+  const f = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+  return [f(new Date(y, m - 1, d - dow)), f(new Date(y, m - 1, d - dow + 6))];
+}
+function mesDeISO(dataISO) {
+  const [y, m] = dataISO.split('-').map(Number);
+  const ult = new Date(y, m, 0).getDate();
+  const mm = String(m).padStart(2, '0');
+  return [y + '-' + mm + '-01', y + '-' + mm + '-' + String(ult).padStart(2, '0')];
+}
+// Janela em que o limite do plano é contado (semana, mês do calendário ou período pago)
+function janelaLimite(lim, dataISO, ini, fim) {
+  if (lim.por === 'semana') return semanaDeISO(dataISO);
+  if (lim.por === 'mes') return mesDeISO(dataISO);
+  return [ini, fim];
+}
+function periodoCobre(p, x) {
+  return x.data >= p.ini && x.data <= p.fim && (!p.ate || x.data < p.ate) &&
+    (COBERTURA_PLANO_NOMES[p.plano] || []).includes(x.servico);
+}
+// Ordem em que o agendamento foi feito (o limite do plano vale para quem reservou primeiro, não para a data do corte)
+function ordemCriacao(x) {
+  const t = x && x.criadoEm;
+  if (t && typeof t.toMillis === 'function') return t.toMillis();
+  if (t && typeof t.seconds === 'number') return t.seconds * 1000;
+  return 0; // sem data de criação (registros antigos): contam como os mais antigos
+}
+function gravadoComoLimiteAtingido(x) { return /^Limite do plano atingido/.test((x && x.obs) || ''); }
+function atendimentoCobertoPorPlano(a) {
+  if (!a || !a.data) return false;
+  if (agendamentoGravadoComoPlano(a)) return true;
+  if (gravadoComoLimiteAtingido(a)) return false; // o site já gravou como cobrado
+  const c = _clientesFirestore[chaveTelefone(a.telefone)];
+  if (!c) return false;
+  const p = periodosDoPlano(c).find(pp => periodoCobre(pp, a));
+  if (!p) return false;
+  const lim = LIMITES_PLANO_ADMIN[p.plano];
+  if (!lim) return true;
+  // Com limite: só os primeiros atendimentos da janela (período ou semana) ficam cobertos; o resto é cobrado
+  const [ini, fim] = janelaLimite(lim, a.data, p.ini, p.fim);
+  const key = chaveTelefone(a.telefone);
+  const doPlano = allAgendamentos
+    .filter(x => x.status !== 'cancelado' && !gravadoComoLimiteAtingido(x) && chaveTelefone(x.telefone) === key &&
+                 x.data >= ini && x.data <= fim && (agendamentoGravadoComoPlano(x) || periodoCobre(p, x)))
+    .sort((x, y) => (ordemCriacao(x) - ordemCriacao(y)) || (x.data + (x.horario || '')).localeCompare(y.data + (y.horario || '')));
+  const idx = doPlano.findIndex(x => x === a || (a.id && x.id === a.id));
+  return idx < 0 ? true : idx < lim.qtd;
+}
+// "Usou X de Y" do plano atual do cliente (mostrado na lista de clientes com plano)
+function usoPlanoHtml(c) {
+  const lim = LIMITES_PLANO_ADMIN[c.plano];
+  if (!lim) return '';
+  const [ini, fim] = janelaLimite(lim, hojeISOAdmin(), c.planoPagoEm, c.planoVenceEm);
+  const key = c.key;
+  const usados = allAgendamentos.filter(x => x.status !== 'cancelado' && chaveTelefone(x.telefone) === key &&
+    x.data >= ini && x.data <= fim && atendimentoCobertoPorPlano(x)).length;
+  const cor = usados >= lim.qtd ? '#e0a030' : '#5E6E9E';
+  return '<div style="font-family:Roboto,sans-serif;font-size:12px;color:' + cor + ';margin-top:2px;">Usou ' + usados + ' de ' + lim.qtd +
+    (lim.por === 'semana' ? ' nesta semana' : lim.por === 'mes' ? ' neste mês' : ' neste período') + '</div>';
+}
+// Data em que o plano foi removido. Remoções antigas (sem data gravada) valem a partir de hoje.
+function dataRemocaoPlano(c) {
+  if (!c) return '';
+  if (c.planoRemovidoEm) return c.planoRemovidoEm;
+  if (!c.plano && Array.isArray(c.planoPagamentos) && c.planoPagamentos.length) return hojeISOAdmin();
+  return '';
+}
+// Preço do atendimento como foi gravado no agendamento (o que era plano e o que era serviço fica memorizado ali).
+function precoAgendamento(a) { return Number(a && a.preco) || 0; }
+function valorReceita(a) { return (a && a.receitaZerada) || atendimentoCobertoPorPlano(a) ? 0 : precoAgendamento(a); }
+
+function clientesComPlano() {
+  return Object.entries(_clientesFirestore)
+    .filter(([, c]) => c && c.plano && c.planoVenceEm)
+    .map(([key, c]) => ({ key, ...c }))
+    .sort((a, b) => a.planoVenceEm.localeCompare(b.planoVenceEm));
+}
+
+function renderPlanosClientes() {
+  const lista = document.getElementById('planos-lista');
+  const bannerLista = document.getElementById('planos-cobrar-lista');
+  const banner = document.getElementById('planos-cobrar-banner');
+  if (!lista) return;
+
+  // Data padrão do formulário
+  const dataEl = document.getElementById('plano-pago');
+  if (dataEl && !dataEl.value) dataEl.value = hojeISOAdmin();
+
+  // Lista de clientes cadastrados no seletor
+  const sel = document.getElementById('plano-cli-select');
+  if (sel) {
+    const atual = sel.value;
+    const opts = Object.entries(_clientesFirestore)
+      .filter(([, c]) => c && c.nome)
+      .sort((a, b) => a[1].nome.localeCompare(b[1].nome))
+      .map(([k, c]) => '<option value="' + escPlano(k) + '">' + escPlano(c.nome) + '</option>');
+    sel.innerHTML = '<option value="">Selecionar...</option>' + opts.join('');
+    sel.value = atual;
+  }
+
+  const planos = clientesComPlano();
+  const cnt = document.getElementById('planos-count');
+  if (cnt) cnt.textContent = planos.length ? '(' + planos.length + ')' : '';
+
+  const corStatus = { ativo: '#6dcc85', hoje: '#EBC531', vencido: '#e05555' };
+  const btnBase = "border-radius:5px;padding:7px 12px;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;white-space:nowrap;text-decoration:none;";
+
+  // Banner: planos vencendo hoje ou atrasados
+  const cobrar = planos.filter(p => statusPlano(p.planoVenceEm).tipo !== 'ativo');
+  if (banner && bannerLista) {
+    if (!cobrar.length) { banner.style.display = 'none'; }
+    else {
+      banner.style.display = 'block';
+      bannerLista.innerHTML = cobrar.map(p => {
+        const st = statusPlano(p.planoVenceEm);
+        const pl = planoDados(p.plano);
+        const tel = chaveTelefone(p.telefone || p.key);
+        const msg = encodeURIComponent(mensagemCobrancaPlano(p.nome, p.plano, p.planoVenceEm));
+        const txt = st.tipo === 'hoje' ? 'Vence hoje' : 'Vencido há ' + st.dias + (st.dias === 1 ? ' dia' : ' dias');
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid rgba(235,197,49,0.15);">' +
+          '<div style="flex:1;min-width:160px;">' +
+            '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;color:#F1EAD6;letter-spacing:.5px;">' + escPlano(p.nome) + '</div>' +
+            '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:' + corStatus[st.tipo] + ';">' + txt + ' · Plano ' + escPlano(pl.nome) + ' · ' + fmtMoedaPlano(pl.preco) + '</div>' +
+          '</div>' +
+          (tel ? '<a href="https://wa.me/55' + tel + '?text=' + msg + '" target="_blank" style="' + btnBase + 'background:#1a2e1a;border:1px solid #2a4a2a;color:#4caf50;">Cobrar →</a>' : '') +
+          '<button onclick="registrarPagamentoPlano(\'' + escPlano(p.key) + '\')" style="' + btnBase + 'background:#EBC531;border:1px solid #F5DC4A;color:#070E24;font-weight:700;">Registrar pagamento</button>' +
+        '</div>';
+      }).join('');
+    }
+  }
+
+  // Lista completa
+  if (!planos.length) {
+    lista.innerHTML = '<div style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#5E6E9E;">Nenhum cliente com plano ainda.</div>';
+    return;
+  }
+  lista.innerHTML = planos.map(p => {
+    const st = statusPlano(p.planoVenceEm);
+    const pl = planoDados(p.plano);
+    const rotulo = pl.vitalicio ? 'Vitalício' : st.tipo === 'ativo' ? 'Ativo' : st.tipo === 'hoje' ? 'Vence hoje' : 'Vencido há ' + st.dias + (st.dias === 1 ? ' dia' : ' dias');
+    return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;background:#0C1838;border:1px solid #122452;border-radius:8px;">' +
+      '<div style="flex:1;min-width:180px;">' +
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;color:#F1EAD6;letter-spacing:.5px;">' + escPlano(p.nome || p.key) + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:12px;color:#7183B4;margin-top:2px;">Plano ' + escPlano(pl.nome) + ' · ' + (pl.vitalicio ? 'Vitalício' : fmtMoedaPlano(pl.preco) + '/mês') + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:12px;color:#5E6E9E;margin-top:2px;">' + (pl.vitalicio ? 'Desde ' + fmtDataBR(p.planoPagoEm) + ' · Sem vencimento' : 'Pagou em ' + fmtDataBR(p.planoPagoEm) + ' · Vence em ' + fmtDataBR(p.planoVenceEm)) + '</div>' +
+        (p.planoAnterior && p.planoTrocadoEm ? '<div style=\"font-family:\'Roboto\',sans-serif;font-size:12px;color:#EBC531;margin-top:2px;\">Trocou de ' + escPlano(planoDados(p.planoAnterior).nome) + ' para ' + escPlano(pl.nome) + ' em ' + fmtDataBR(p.planoTrocadoEm) + '</div>' : '') +
+        usoPlanoHtml(p) +
+      '</div>' +
+      '<span style="font-family:\'Oswald\',sans-serif;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:' + corStatus[st.tipo] + ';border:1px solid ' + corStatus[st.tipo] + '55;padding:4px 10px;border-radius:20px;white-space:nowrap;">' + rotulo + '</span>' +
+      (pl.vitalicio ? '' : '<button onclick="registrarPagamentoPlano(\'' + escPlano(p.key) + '\')" style="' + btnBase + 'background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;">Registrar pagamento</button>') +
+      '<button onclick=\"abrirTrocarPlano(\'' + escPlano(p.key) + '\')\" style=\"' + btnBase + 'background:transparent;border:1px solid #EBC53166;color:#EBC531;\">Trocar plano</button>' +
+      '<button onclick="removerPlanoCliente(\'' + escPlano(p.key) + '\')" style="' + btnBase + 'background:transparent;border:1px solid rgba(200,60,60,0.35);color:#e05555;">Remover</button>' +
+    '</div>';
+  }).join('');
+}
+
+function preencherClientePlano(key) {
+  const c = _clientesFirestore[key];
+  if (!c) return;
+  const n = document.getElementById('plano-nome');
+  const t = document.getElementById('plano-tel');
+  if (n) n.value = c.nome || '';
+  if (t) t.value = c.telefone || key;
+  if (c.plano) { const s = document.getElementById('plano-tipo'); if (s) s.value = c.plano; }
+}
+
+async function salvarPlanoCliente() {
+  const nome = (document.getElementById('plano-nome')?.value || '').trim();
+  const key  = chaveTelefone(document.getElementById('plano-tel')?.value);
+  const plano = document.getElementById('plano-tipo')?.value || '';
+  const pago  = document.getElementById('plano-pago')?.value || '';
+  const st = document.getElementById('plano-status');
+  const aviso = (t, cor) => { if (st) { st.textContent = t; st.style.color = cor; } };
+  if (!nome || key.length < 10 || !plano || !pago) { aviso('Preencha nome, WhatsApp, plano e dia do pagamento.', '#b03030'); return; }
+  aviso('Salvando...', '#94A4CC');
+  try {
+    const venc = vencimentoDoPlano(plano, pago);
+    const data = { nome, telefone: key, plano, planoPagoEm: pago, planoVenceEm: venc };
+    if (!_clientesFirestore[key]) data.criadoEm = firebase.firestore.FieldValue.serverTimestamp();
+    const pag = { data: pago, valor: planoDados(plano).preco, plano };
+    if (planoVitalicio(plano)) pag.fim = venc;
+    await db.collection('clientes').doc(key).set(
+      { ...data, planoPagamentos: firebase.firestore.FieldValue.arrayUnion(pag) }, { merge: true });
+    _clientesFirestore[key] = { ...(_clientesFirestore[key] || {}), ...data,
+      planoPagamentos: somarPagamentoLocal(_clientesFirestore[key], pag) };
+    try { renderDashboard(); } catch (e) {}
+    aviso(planoVitalicio(plano) ? 'Plano vitalício salvo!' : 'Plano salvo! Vence em ' + fmtDataBR(venc) + '.', '#4caf50');
+    ['plano-nome', 'plano-tel'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    const s = document.getElementById('plano-cli-select'); if (s) s.value = '';
+    const dp = document.getElementById('plano-pago'); if (dp) dp.value = hojeISOAdmin();
+    setTimeout(() => aviso('', '#5E6E9E'), 4000);
+    renderPlanosClientes();
+  } catch (e) {
+    console.warn(e);
+    aviso('Erro ao salvar o plano.', '#b03030');
+  }
+}
+
+// Renova: pagamento hoje, vencimento no mesmo dia do mês seguinte
+async function registrarPagamentoPlano(key) {
+  const c = _clientesFirestore[key];
+  if (!c) return;
+  const pl = planoDados(c.plano);
+  if (pl.vitalicio) { showToast('Plano vitalício: não tem pagamento nem vencimento.'); return; }
+  if (!confirm('Registrar o pagamento de ' + (c.nome || key) + ' (' + pl.nome + ', ' + fmtMoedaPlano(pl.preco) + ') hoje?\nO novo vencimento será ' + fmtDataBR(somarUmMes(hojeISOAdmin())) + '.')) return;
+  try {
+    const pago = hojeISOAdmin();
+    const upd = { planoPagoEm: pago, planoVenceEm: somarUmMes(pago) };
+    const pag = { data: pago, valor: pl.preco, plano: c.plano };
+    await db.collection('clientes').doc(key).set(
+      { ...upd, planoPagamentos: firebase.firestore.FieldValue.arrayUnion(pag) }, { merge: true });
+    _clientesFirestore[key] = { ..._clientesFirestore[key], ...upd,
+      planoPagamentos: somarPagamentoLocal(_clientesFirestore[key], pag) };
+    try { renderDashboard(); } catch (e) {}
+    showToast('Pagamento registrado. Vence em ' + fmtDataBR(upd.planoVenceEm) + '.');
+    renderPlanosClientes();
+  } catch (e) {
+    console.warn(e);
+    showToast('Erro ao registrar o pagamento.');
+  }
+}
+
+// ── Trocar plano (migrar o cliente para outro plano) ──
+let _trocaKey = null;
+let _trocaValorEditado = false;
+function valorPadraoTroca(c, novoId, modo) {
+  const novo = planoDados(novoId).preco, atual = planoDados(c.plano).preco;
+  return modo === 'manter' ? Math.max(0, novo - atual) : novo;
+}
+function abrirTrocarPlano(key) {
+  const c = _clientesFirestore[key];
+  if (!c || !c.plano) return;
+  _trocaKey = key; _trocaValorEditado = false;
+  document.getElementById('troca-cliente').textContent = c.nome || key;
+  document.getElementById('troca-atual').textContent = planoDados(c.plano).nome + (planoVitalicio(c.plano) ? ' · vitalício' : ' · ' + fmtMoedaPlano(planoDados(c.plano).preco) + '/mês · vence em ' + fmtDataBR(c.planoVenceEm));
+  const sel = document.getElementById('troca-novo');
+  sel.innerHTML = PLANOS_ADMIN.filter(pl => pl.id !== c.plano)
+    .map(pl => '<option value="' + pl.id + '">' + escPlano(pl.nome) + ' - ' + (pl.vitalicio ? 'Vitalício' : fmtMoedaPlano(pl.preco)) + '</option>').join('');
+  document.querySelector('input[name="troca-modo"][value="novo"]').checked = true;
+  document.getElementById('troca-data').value = hojeISOAdmin();
+  atualizarTrocarPlano();
+  document.getElementById('troca-status').textContent = '';
+  document.getElementById('troca-modal').style.display = 'flex';
+}
+function fecharTrocarPlano() {
+  document.getElementById('troca-modal').style.display = 'none';
+  _trocaKey = null;
+}
+function atualizarTrocarPlano(origem) {
+  const c = _clientesFirestore[_trocaKey];
+  if (!c) return;
+  const novoId = document.getElementById('troca-novo').value;
+  // Com plano vitalício (atual ou novo) não existe "manter vencimento": sempre começa um novo ciclo
+  const semManter = planoVitalicio(c.plano) || planoVitalicio(novoId);
+  document.querySelector('input[name="troca-modo"][value="manter"]').disabled = semManter;
+  document.getElementById('troca-modo-manter').style.opacity = semManter ? '0.4' : '1';
+  if (semManter) document.querySelector('input[name="troca-modo"][value="novo"]').checked = true;
+  const modo = document.querySelector('input[name="troca-modo"]:checked').value;
+  const dataEl = document.getElementById('troca-data');
+  const valEl = document.getElementById('troca-valor');
+  if (origem === 'valor') _trocaValorEditado = true;
+  if (origem === 'modo' || origem === 'plano') _trocaValorEditado = false;
+  if (!_trocaValorEditado) valEl.value = valorPadraoTroca(c, novoId, modo).toFixed(2);
+  const data = dataEl.value || hojeISOAdmin();
+  const venc = vencimentoTroca(c, novoId, modo, data);
+  document.getElementById('troca-resumo').innerHTML =
+    escPlano(planoDados(c.plano).nome) + ' <span style="color:#EBC531;">→</span> <strong style="color:#F1EAD6;">' + escPlano(planoDados(novoId).nome) + '</strong>' +
+    '<br>Novo vencimento: <strong style="color:#F1EAD6;">' + (planoVitalicio(novoId) ? 'Vitalício (sem vencimento)' : fmtDataBR(venc)) + '</strong>';
+  document.getElementById('troca-modo-novo').style.borderColor = modo === 'novo' ? '#EBC531' : '#233F80';
+  document.getElementById('troca-modo-manter').style.borderColor = modo === 'manter' ? '#EBC531' : '#233F80';
+}
+async function confirmarTrocarPlano() {
+  const key = _trocaKey, c = _clientesFirestore[key];
+  const st = document.getElementById('troca-status');
+  const aviso = (t, cor) => { st.textContent = t; st.style.color = cor; };
+  if (!c) return;
+  const novoId = document.getElementById('troca-novo').value;
+  const modo = document.querySelector('input[name="troca-modo"]:checked').value;
+  const data = document.getElementById('troca-data').value;
+  const valor = Number(String(document.getElementById('troca-valor').value).replace(',', '.'));
+  if (!novoId || !data) { aviso('Escolha o novo plano e a data da troca.', '#e05555'); return; }
+  if (!(valor >= 0)) { aviso('Valor inválido.', '#e05555'); return; }
+  if (modo === 'manter' && data > c.planoVenceEm) { aviso('A data da troca não pode ser depois do vencimento atual.', '#e05555'); return; }
+  aviso('Salvando...', '#94A4CC');
+  try {
+    const venc = vencimentoTroca(c, novoId, modo, data);
+    // Pagamentos em aberto do plano antigo passam a cobrir só até o dia da troca
+    const lista = (Array.isArray(c.planoPagamentos) ? c.planoPagamentos : [])
+      .map(x => x.encerradoEm ? x : { ...x, encerradoEm: data });
+    const pag = { data, valor, plano: novoId };
+    if (modo === 'manter' || planoVitalicio(novoId)) pag.fim = venc;
+    lista.push(pag);
+    const upd = { plano: novoId, planoPagoEm: data, planoVenceEm: venc, planoAnterior: c.plano, planoTrocadoEm: data };
+    await db.collection('clientes').doc(key).set({ ...upd, planoPagamentos: lista }, { merge: true });
+    _clientesFirestore[key] = { ..._clientesFirestore[key], ...upd, planoPagamentos: lista };
+    fecharTrocarPlano();
+    showToast('Plano trocado para ' + planoDados(novoId).nome + (planoVitalicio(novoId) ? '.' : '. Vence em ' + fmtDataBR(venc) + '.'));
+    renderPlanosClientes();
+    try { renderDashboard(); } catch (e) {}
+    try { renderClientes(); } catch (e) {}
+  } catch (e) {
+    console.warn(e);
+    aviso('Erro ao trocar o plano.', '#e05555');
+  }
+}
+
+// ── Editar receita ──
+// Lista os atendimentos concluídos e os pagamentos de plano que entram na receita,
+// permite corrigir o valor de cada um ou tirá-lo da receita.
+let _editRec = { itens: [], edits: {} };   // edits[id] = { valor: string, removido: bool }
+
+function coletarItensReceita() {
+  const itens = [];
+  allAgendamentos.forEach(a => {
+    if (a.status !== 'concluido' || a.receitaZerada || !a.id) return;
+    if (atendimentoCobertoPorPlano(a)) return;        // atendimento coberto por plano não gera receita
+    itens.push({ id: 'ag:' + a.id, tipo: 'ag', agId: a.id, data: a.data || '', nome: a.cliente || '—',
+                 desc: a.servico || 'Atendimento', valor: precoAgendamento(a) });
+  });
+  Object.entries(_clientesFirestore).forEach(([key, c]) => {
+    if (!c || !Array.isArray(c.planoPagamentos)) return;
+    c.planoPagamentos.forEach((p, idx) => {
+      if (!p || p.zerado || !p.data) return;
+      itens.push({ id: 'pl:' + key + ':' + idx, tipo: 'pl', key, idx, data: p.data, nome: c.nome || key,
+                   desc: 'Mensalidade · ' + planoDados(p.plano || c.plano).nome, valor: Number(p.valor) || 0 });
+    });
+  });
+  return itens.sort((x, y) => (y.data || '').localeCompare(x.data || ''));
+}
+function abrirEditarReceita() {
+  _editRec = { itens: coletarItensReceita(), edits: {} };
+  // começa com o mesmo período do filtro do dashboard (se houver)
+  document.getElementById('editrec-de').value  = document.getElementById('dash-filter-de').value  || '';
+  document.getElementById('editrec-ate').value = document.getElementById('dash-filter-ate').value || '';
+  document.getElementById('editrec-busca').value = '';
+  document.getElementById('editrec-status').textContent = '';
+  renderEditarReceita();
+  document.getElementById('editrec-modal').style.display = 'flex';
+}
+function fecharEditarReceita() { document.getElementById('editrec-modal').style.display = 'none'; }
+function editRecValorAtual(it) {
+  const e = _editRec.edits[it.id];
+  if (!e) return it.valor;
+  if (e.removido) return 0;
+  const v = Number(String(e.valor).replace(',', '.'));
+  return isNaN(v) || v < 0 ? it.valor : v;
+}
+function editRecItensVisiveis() {
+  const de = document.getElementById('editrec-de').value;
+  const ate = document.getElementById('editrec-ate').value;
+  const q = (document.getElementById('editrec-busca').value || '').toLowerCase().trim();
+  return _editRec.itens.filter(it =>
+    (!de || it.data >= de) && (!ate || it.data <= ate) && (!q || String(it.nome).toLowerCase().includes(q)));
+}
+function renderEditarReceita() {
+  const lista = document.getElementById('editrec-lista');
+  const vis = editRecItensVisiveis();
+  if (!vis.length) {
+    lista.innerHTML = '<p style="color:#5E6E9E;font-family:Oswald,sans-serif;font-size:13px;letter-spacing:1px;padding:16px 0;">Nenhum lançamento de receita neste período.</p>';
+    atualizarResumoEditarReceita();
+    return;
+  }
+  lista.innerHTML = vis.map(it => {
+    const e = _editRec.edits[it.id] || {};
+    const rem = !!e.removido;
+    const val = e.valor != null ? e.valor : it.valor.toFixed(2);
+    const idAttr = escPlano(it.id);
+    return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0A1330;border:1px solid ' + (rem ? '#5a2020' : '#122452') + ';border-radius:6px;padding:9px 12px;opacity:' + (rem ? '.55' : '1') + ';">' +
+      '<div style="flex:1;min-width:150px;">' +
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:13px;color:#F1EAD6;letter-spacing:.5px;' + (rem ? 'text-decoration:line-through;' : '') + '">' + escPlano(it.nome) + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#7183B4;">' + (it.data ? fmtDataBR(it.data) : '--') + ' · ' + escPlano(it.desc) + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<span style="font-family:\'Roboto\',sans-serif;font-size:12px;color:#5E6E9E;">R$</span>' +
+        '<input type="number" min="0" step="0.01" value="' + escPlano(val) + '" ' + (rem ? 'disabled ' : '') + 'oninput="editRecMudou(\'' + idAttr + '\', this.value)" ' +
+          'style="width:88px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:7px 8px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:14px;outline:none;"/>' +
+        '<button onclick="editRecAlternarRemover(\'' + idAttr + '\')" title="' + (rem ? 'Voltar para a receita' : 'Tirar da receita') + '" style="width:32px;height:32px;border-radius:6px;cursor:pointer;background:' + (rem ? '#1B3168' : 'transparent') + ';border:1px solid ' + (rem ? '#2C4E9E' : 'rgba(200,60,60,0.4)') + ';color:' + (rem ? '#F1EAD6' : '#e05555') + ';font-size:13px;">' + (rem ? '↩' : '✕') + '</button>' +
+      '</div></div>';
+  }).join('');
+  atualizarResumoEditarReceita();
+}
+function editRecMudou(id, v) {
+  const e = _editRec.edits[id] = _editRec.edits[id] || {};
+  e.valor = v;
+  atualizarResumoEditarReceita();
+}
+function editRecAlternarRemover(id) {
+  const it = _editRec.itens.find(x => x.id === id);
+  const e = _editRec.edits[id] = _editRec.edits[id] || { valor: it ? it.valor.toFixed(2) : '0' };
+  e.removido = !e.removido;
+  renderEditarReceita();
+}
+function atualizarResumoEditarReceita() {
+  const vis = editRecItensVisiveis();
+  const antes = vis.reduce((s, it) => s + it.valor, 0);
+  const depois = vis.reduce((s, it) => s + editRecValorAtual(it), 0);
+  const mudou = Object.keys(_editRec.edits).length;
+  document.getElementById('editrec-resumo').innerHTML =
+    vis.length + ' lançamento' + (vis.length === 1 ? '' : 's') + ' · Total listado: <strong style="color:#F1EAD6;">' + fmtMoedaPlano(antes) + '</strong>' +
+    (Math.abs(depois - antes) > 0.004 ? ' → <strong style="color:#EBC531;">' + fmtMoedaPlano(depois) + '</strong>' : '') +
+    (mudou ? ' · <span style="color:#EBC531;">' + mudou + ' alterado' + (mudou === 1 ? '' : 's') + '</span>' : '');
+}
+async function salvarEditarReceita() {
+  const st = document.getElementById('editrec-status');
+  const btn = document.getElementById('editrec-salvar');
+  const ops = [];
+  const clientes = {};   // key -> nova lista de pagamentos
+  let invalido = false;
+  _editRec.itens.forEach(it => {
+    const e = _editRec.edits[it.id];
+    if (!e) return;
+    const novo = Number(String(e.valor).replace(',', '.'));
+    if (!e.removido && (isNaN(novo) || novo < 0)) { invalido = true; return; }
+    if (!e.removido && Math.abs(novo - it.valor) < 0.004) return;   // nada mudou
+    if (it.tipo === 'ag') {
+      ops.push({ ref: db.collection('agendamentos').doc(it.agId), data: e.removido ? { receitaZerada: true } : { preco: novo }, ag: it.agId, removido: !!e.removido, novo });
+    } else {
+      const c = _clientesFirestore[it.key];
+      if (!c || !Array.isArray(c.planoPagamentos)) return;
+      const lista = clientes[it.key] || (clientes[it.key] = c.planoPagamentos.map(p => ({ ...p })));
+      const p = lista[it.idx];
+      if (!p || p.data !== it.data || (Number(p.valor) || 0) !== it.valor) return;   // mudou por outro lado: ignora
+      if (e.removido) p.zerado = true; else p.valor = novo;
+    }
+  });
+  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Há valores inválidos. Use números maiores ou iguais a zero.'; return; }
+  const agOps = ops;
+  const clOps = Object.entries(clientes).map(([key, lista]) => ({ ref: db.collection('clientes').doc(key), data: { planoPagamentos: lista }, key, lista }));
+  if (!agOps.length && !clOps.length) { st.style.color = '#94A4CC'; st.textContent = 'Nenhuma alteração para salvar.'; return; }
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    const todos = [...agOps, ...clOps];
+    for (let i = 0; i < todos.length; i += 400) {
+      const batch = db.batch();
+      todos.slice(i, i + 400).forEach(o => batch.update(o.ref, o.data));
+      await batch.commit();
+    }
+    agOps.forEach(o => {
+      const a = allAgendamentos.find(x => x.id === o.ag);
+      if (a) { if (o.removido) a.receitaZerada = true; else a.preco = o.novo; }
+    });
+    clOps.forEach(o => { if (_clientesFirestore[o.key]) _clientesFirestore[o.key].planoPagamentos = o.lista; });
+    fecharEditarReceita();
+    showToast('Receita atualizada (' + todos.length + ' lançamento' + (todos.length === 1 ? '' : 's') + ').');
+    try { renderDashboard(); } catch (e) {}
+    try { renderClientes(); } catch (e) {}
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+// ── Zerar receitas ──
+// Marca os atendimentos concluídos (receitaZerada) e os pagamentos de plano (zerado) como já "descontados".
+// Nada é apagado: só deixa de entrar na soma de receita.
+function receitaAtualTotal() {
+  const serv = allAgendamentos.filter(a => a.status === 'concluido' && !a.receitaZerada).reduce((s, a) => s + valorReceita(a), 0);
+  return serv + receitaDePlanos('', '');
+}
+function abrirZerarReceitas() {
+  document.getElementById('zerar-receitas-valor').textContent = fmtMoedaPlano(receitaAtualTotal());
+  document.getElementById('zerar-receitas-input').value = '';
+  document.getElementById('zerar-receitas-status').textContent = '';
+  validarZerarReceitas();
+  document.getElementById('zerar-receitas-modal').style.display = 'flex';
+}
+function fecharZerarReceitas() { document.getElementById('zerar-receitas-modal').style.display = 'none'; }
+function validarZerarReceitas() {
+  const ok = (document.getElementById('zerar-receitas-input').value || '').trim().toUpperCase() === 'ZERAR';
+  const btn = document.getElementById('zerar-receitas-confirmar');
+  btn.disabled = !ok;
+  btn.style.background  = ok ? 'rgba(176,48,48,0.2)' : 'rgba(176,48,48,0.08)';
+  btn.style.borderColor = ok ? 'rgba(176,48,48,0.6)' : 'rgba(176,48,48,0.2)';
+  btn.style.color       = ok ? '#d45a5a' : '#7183B4';
+  btn.style.cursor      = ok ? 'pointer' : 'not-allowed';
+}
+async function confirmarZerarReceitas() {
+  const st = document.getElementById('zerar-receitas-status');
+  const btn = document.getElementById('zerar-receitas-confirmar');
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Zerando...';
+  try {
+    const ops = [];
+    allAgendamentos.filter(a => a.status === 'concluido' && !a.receitaZerada && a.id)
+      .forEach(a => ops.push({ ref: db.collection('agendamentos').doc(a.id), data: { receitaZerada: true } }));
+    const clientesAtualizados = {};
+    Object.entries(_clientesFirestore).forEach(([key, c]) => {
+      if (c && Array.isArray(c.planoPagamentos) && c.planoPagamentos.some(p => !p.zerado)) {
+        const lista = c.planoPagamentos.map(p => p.zerado ? p : { ...p, zerado: true });
+        clientesAtualizados[key] = lista;
+        ops.push({ ref: db.collection('clientes').doc(key), data: { planoPagamentos: lista } });
       }
+    });
+    for (let i = 0; i < ops.length; i += 400) {
+      const batch = db.batch();
+      ops.slice(i, i + 400).forEach(o => batch.update(o.ref, o.data));
+      await batch.commit();
     }
-    /* Evita que conteudo fique atras do notch lateral */
-    body {
-      padding-left: env(safe-area-inset-left);
-      padding-right: env(safe-area-inset-right);
-    }
-    input[type="time"] { color-scheme: dark; }
-    /* ── Badge Agendado ── */
-    .badge-agendado { background: rgba(235,197,49,.15); color: #EBC531; border: 1px solid rgba(235,197,49,.3); padding: 3px 10px; border-radius: 4px; font-size: 11px; font-family: 'Oswald', sans-serif; letter-spacing: 1px; }
-    .badge-confirmado { background: rgba(39,174,96,.15); color: #1f9e54; border: 1px solid rgba(39,174,96,.3); padding: 3px 10px; border-radius: 4px; font-size: 11px; font-family: 'Oswald', sans-serif; letter-spacing: 1px; }
-    .badge-concluido  { background: rgba(52,152,219,.15); color: #2b7bc2; border: 1px solid rgba(52,152,219,.3); padding: 3px 10px; border-radius: 4px; font-size: 11px; font-family: 'Oswald', sans-serif; letter-spacing: 1px; }
-    .badge-cancelado  { background: rgba(192,57,43,.15);  color: #b03030; border: 1px solid rgba(192,57,43,.3);  padding: 3px 10px; border-radius: 4px; font-size: 11px; font-family: 'Oswald', sans-serif; letter-spacing: 1px; }
+    allAgendamentos.forEach(a => { if (a.status === 'concluido') a.receitaZerada = true; });
+    Object.entries(clientesAtualizados).forEach(([key, lista]) => { _clientesFirestore[key].planoPagamentos = lista; });
+    fecharZerarReceitas();
+    showToast('Receitas zeradas.');
+    try { renderDashboard(); } catch (e) {}
+    try { renderClientes(); } catch (e) {}
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao zerar: ' + (e.message || e.code || e);
+    validarZerarReceitas();
+  }
+}
 
-    /* ── Sidebar Logo ── */
-    .sidebar-brand {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 0 4px;
-    }
-    .sidebar-logo {
-      width: 110px;
-      height: 110px;
-      object-fit: contain;
-      filter: none;
-      opacity: 0.93;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      display: block;
-    }
-    .sidebar-logo:hover {
-      opacity: 1;
-      transform: scale(1.05);
-    }
-    .sidebar-brand-text {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 13px;
-      letter-spacing: 5px;
-      color: rgba(240,236,228,0.4);
-      text-transform: uppercase;
-    }
-    @media (max-width: 768px) {
-      .sidebar-logo { width: 56px; height: 56px; }
-    }
-    .toggle-slider {
-      width: 44px; height: 24px; border-radius: 12px;
-      position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; display:inline-block;
-    }
-    .toggle-knob {
-      width: 18px; height: 18px; border-radius: 50%; background: #fff;
-      position: absolute; top: 3px; transition: left .2s;
-    }
-    /* Inputs inline nos painéis de horários e datas */
-    #horarios-grid input[type="time"],
-    #de-data, #de-desc, #de-tipo, #de-inicio, #de-fim,
-    #de-almoco-inicio, #de-almoco-fim {
-      background: #122452 !important;
-      border: 1px solid #233F80 !important;
-      color: #F1EAD6 !important;
-    }
-    /* Botão salvar horários */
-    #btn-salvar-horarios {
-      background: #1B3168 !important;
-      border: 1px solid #2C4E9E !important;
-      color: #F1EAD6 !important;
-      font-family: 'Oswald', sans-serif !important;
-      font-size: 12px !important;
-      letter-spacing: 2px !important;
-      text-transform: uppercase !important;
-      padding: 13px 32px !important;
-      border-radius: 6px !important;
-      cursor: pointer !important;
-      transition: background .2s !important;
-    }
-    #btn-salvar-horarios:hover { background: #233F80 !important; }
-  </style>
-</head>
-<body class="admin-body">
+async function removerPlanoCliente(key) {
+  const c = _clientesFirestore[key];
+  if (!c) return;
+  if (!confirm('Remover o plano de ' + (c.nome || key) + '? Ele volta a pagar os serviços normalmente a partir de hoje. O histórico e os pagamentos já feitos são mantidos.')) return;
+  try {
+    const del = firebase.firestore.FieldValue.delete();
+    const removidoEm = hojeISOAdmin();
+    const pagamentos = (Array.isArray(c.planoPagamentos) ? c.planoPagamentos : [])
+      .map(p => p.encerradoEm ? p : { ...p, encerradoEm: removidoEm });
+    const upd = { plano: del, planoPagoEm: del, planoVenceEm: del, planoRemovidoEm: removidoEm };
+    if (pagamentos.length) upd.planoPagamentos = pagamentos;
+    await db.collection('clientes').doc(key).update(upd);
+    delete _clientesFirestore[key].plano;
+    delete _clientesFirestore[key].planoPagoEm;
+    delete _clientesFirestore[key].planoVenceEm;
+    _clientesFirestore[key].planoRemovidoEm = removidoEm;
+    if (pagamentos.length) _clientesFirestore[key].planoPagamentos = pagamentos;
+    showToast('Plano removido.');
+    renderPlanosClientes();
+    try { renderDashboard(); } catch (e) {}
+    try { renderClientes(); } catch (e) {}
+  } catch (e) {
+    console.warn(e);
+    showToast('Erro ao remover o plano.');
+  }
+}
 
-  <!-- LOGIN -->
-  <div id="login-screen" class="login-screen">
-    <div class="login-card">
-      <img src="logo.png" alt="Wellisson Barber" class="login-logo" data-logo/>
-      <h2>Painel Administrativo</h2>
-      <p>Entre com a senha do dono</p>
-      <div class="form-group">
-        <label>Senha</label>
-        <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
+
+// Ao abrir o painel: avisa os planos que vencem hoje ou já venceram
+async function verificarPlanosGlobal() {
+  try {
+    const snap = await db.collection('clientes').get();
+    const cobrar = [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      if (d.plano && d.planoVenceEm && statusPlano(d.planoVenceEm).tipo !== 'ativo') cobrar.push({ key: doc.id, ...d });
+    });
+    if (!cobrar.length) return;
+    cobrar.sort((a, b) => a.planoVenceEm.localeCompare(b.planoVenceEm));
+    const nomes = cobrar.map(c => (c.nome || '').split(' ')[0]).join(', ');
+    setTimeout(() => {
+      showPlanoAlert(cobrar);
+      enviarNotificacaoPlano(nomes, cobrar.length);
+    }, 3000);
+  } catch (e) {}
+}
+
+function showPlanoAlert(cobrar) {
+  let el = document.getElementById('admin-plano-alert');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'admin-plano-alert';
+    document.body.appendChild(el);
+  }
+  const aniv = document.getElementById('admin-aniv-alert');
+  const top = (aniv && aniv.style.display !== 'none' && aniv.offsetHeight) ? aniv.offsetHeight + 32 : 20;
+  el.style.cssText = 'position:fixed;top:' + top + 'px;right:20px;z-index:99998;max-width:360px;width:calc(100vw - 40px);';
+  const lista = cobrar.map(c => {
+    const st = statusPlano(c.planoVenceEm);
+    const pl = planoDados(c.plano);
+    const tel = chaveTelefone(c.telefone || c.key);
+    const msg = encodeURIComponent(mensagemCobrancaPlano(c.nome, c.plano, c.planoVenceEm));
+    const txt = st.tipo === 'hoje' ? 'Vence hoje' : 'Vencido há ' + st.dias + (st.dias === 1 ? ' dia' : ' dias');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(235,197,49,0.15);">' +
+      '<div style="flex:1;">' +
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:13px;color:#F1EAD6;letter-spacing:.5px;">' + escPlano(c.nome) + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#EBC531;">' + txt + ' · ' + escPlano(pl.nome) + ' · ' + fmtMoedaPlano(pl.preco) + '</div>' +
+      '</div>' +
+      (tel ? '<a href="https://wa.me/55' + tel + '?text=' + msg + '" target="_blank" style="background:#1a2e1a;border:1px solid #2a4a2a;color:#4caf50;padding:6px 12px;border-radius:5px;font-family:\'Oswald\',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;white-space:nowrap;flex-shrink:0;">Cobrar →</a>' : '') +
+    '</div>';
+  }).join('');
+  el.innerHTML =
+    '<div style="background:#1a1208;border:1px solid #EBC531;border-radius:10px;padding:18px 20px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+        '<span style="font-family:\'Oswald\',sans-serif;font-size:11px;letter-spacing:2px;color:#EBC531;text-transform:uppercase;">Planos para Cobrar</span>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<button onclick="showTab(\'clientes\',null);syncBottomNav(\'bnav-clientes\');document.getElementById(\'admin-plano-alert\').style.display=\'none\';" style="background:#EBC531;border:none;color:#070E24;padding:5px 12px;border-radius:5px;font-family:\'Oswald\',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;font-weight:700;">Ver Planos</button>' +
+          '<button onclick="document.getElementById(\'admin-plano-alert\').style.display=\'none\';" style="background:none;border:none;color:#7183B4;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">&times;</button>' +
+        '</div>' +
+      '</div>' +
+      '<div>' + lista + '</div>' +
+    '</div>';
+  el.style.display = 'block';
+}
+
+async function enviarNotificacaoPlano(nomes, qtd) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification('Wellisson Barber — Plano para cobrar', {
+      body: nomes + (qtd > 1 ? ': planos vencidos ou vencendo hoje. Hora de cobrar!' : ': plano vence hoje ou já venceu. Hora de cobrar!'),
+      icon: 'logo.png',
+      tag: 'plano-vencimento',
+      requireInteraction: true,
+    });
+    n.onclick = () => { window.focus(); showTab('clientes', null); syncBottomNav('bnav-clientes'); n.close(); };
+  } catch (e) {}
+}
+
+async function renderClientes() {
+  await carregarClientesFirestore();
+  const map = buildClientMap();
+  const clientes = Object.values(map).map(c => ({ ...c, stats: calcClientStats(c.agendamentos) }));
+  _clientListCache = clientes;
+
+  renderAniversariantesBanner(clientes);
+  renderPlanosClientes();
+
+  const totalClientes = clientes.length;
+  const totalGasto    = clientes.reduce((s, c) => s + c.stats.gastoTotal, 0);
+  const totalConc     = clientes.reduce((s, c) => s + c.stats.pagos, 0);
+  const ticketMedio   = totalConc ? totalGasto / totalConc : 0; // só atendimentos pagos
+  const totalPlanos   = receitaDePlanos('', '');                 // mensalidades de planos
+  const clienteTop    = [...clientes].sort((a, b) => b.stats.gastoTotal - a.stats.gastoTotal)[0];
+
+  const resumoEl = document.getElementById('clientes-resumo');
+  if (resumoEl) {
+    resumoEl.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:0;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.05);border-radius:8px;overflow:hidden;margin-bottom:28px;';
+    const svgClientes = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>`;
+    const svgReceita  = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>`;
+    const svgTicket   = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`;
+    const svgTop      = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`;
+    resumoEl.innerHTML = [
+      { icon: svgClientes, val: totalClientes,   label: 'Total de Clientes' },
+      { icon: svgReceita,  val: 'R$' + (totalGasto + totalPlanos).toFixed(2).replace('.', ','), label: totalPlanos > 0 ? 'Receita Total (com planos)' : 'Receita Total' },
+      { icon: svgTicket,   val: isNaN(ticketMedio)||!isFinite(ticketMedio) ? 'R$0,00' : 'R$' + ticketMedio.toFixed(2).replace('.', ','), label: 'Ticket Médio' },
+      { icon: svgTop,      val: clienteTop ? clienteTop.nome.split(' ')[0] : '—', label: 'Maior Gastador' },
+    ].map((c, i) => `
+      <div style="background:#0C1838;padding:18px 20px;border-right:${i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none'};">
+        <div style="color:#233F80;margin-bottom:10px;">${c.icon}</div>
+        <div style="font-family:'Playfair Display',Georgia,serif;font-size:26px;color:#F1EAD6;letter-spacing:1px;line-height:1;">${c.val}</div>
+        <div style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;margin-top:6px;">${c.label}</div>
       </div>
-      <button class="btn-login" onclick="doLogin()">Entrar</button>
-      <p class="login-error" id="login-error"></p>
-    </div>
-  </div>
+    `).join('');
+  }
 
-  <!-- PAINEL -->
-  <div id="admin-panel" class="admin-panel" style="display:none;">
-    <aside class="sidebar">
-      <div class="sidebar-top">
-        <div class="sidebar-brand">
-          <img src="logo_emblema.png" alt="" class="sidebar-logo" data-logo/>
-          <span class="sidebar-brand-text" id="admin-marca-nome">Wellisson Barber</span>
-        </div>
-      </div>
-      <nav class="sidebar-nav">
-        <a href="#" class="nav-item active" onclick="showTab('dashboard', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span>Dashboard</span>
-        </a>
-        <a href="#" class="nav-item" onclick="showTab('agendamentos', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span><span>Agendamentos</span>
-        </a>
-        <a href="#" class="nav-item" onclick="showTab('horarios', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span><span>Horários</span>
-        </a>
-        <a href="#" class="nav-item" onclick="showTab('datas', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></span><span>Datas Especiais</span>
-        </a>
-        <a href="#" class="nav-item" onclick="showTab('servicos', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><circle cx="7" cy="7" r="1.5"/></svg></span>Serviços
-        </a>
-        <a href="#" class="nav-item" onclick="showTab('clientes', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></span><span>Clientes</span>
-        </a>
-        <a href="#" class="nav-item" onclick="showTab('ajustes', this)">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span><span>Ajustes</span>
-        </a>
-      </nav>
-      <div class="sidebar-bottom">
-        <button class="btn-logout" onclick="doLogout()">Sair</button>
-        <a href="index.html" class="btn-site" target="_blank">Ver Site ↗</a>
-      </div>
-    </aside>
+  filtrarClientes();
+}
 
-    <main class="admin-main">
-      <header class="admin-header">
-        <div>
-          <h1 id="page-title">Dashboard</h1>
-          <p id="admin-date"></p>
-        </div>
-        <div class="header-actions">
-          <!-- Botão para ativar notificações (necessário no iPhone) -->
-          <button id="btn-ativar-push" onclick="ativarNotificacoes()" style="display:none;background:#EBC531;color:#0A1330;border:1px solid #F5DC4A;border-radius:4px;padding:8px 14px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;white-space:nowrap;">Ativar notificações</button>
-          <!-- Sino de notificações -->
-          <div id="notif-bell" onclick="toggleNotifPanel()" style="position:relative;cursor:pointer;padding:8px;border-radius:4px;transition:background .2s;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#8496C4" stroke-width="1.5" id="bell-icon">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 01-3.46 0"/>
-            </svg>
-            <span id="notif-badge" style="display:none;position:absolute;top:4px;right:4px;width:8px;height:8px;background:#d45a5a;border-radius:50%;border:1.5px solid #0f0f0f;"></span>
-          </div>
-          <!-- Painel de notificações -->
-          <div id="notif-panel" style="display:none;position:absolute;top:60px;right:20px;width:340px;background:#0C1838;border:1px solid #16295C;border-radius:4px;box-shadow:0 24px 60px rgba(0,0,0,0.8);z-index:9997;overflow:hidden;max-height:480px;display:none;flex-direction:column;">
-            <div style="padding:14px 18px;border-bottom:1px solid #122452;display:flex;align-items:center;justify-content:space-between;">
-              <span style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#8496C4;">Notificações</span>
-              <button onclick="limparNotificacoes()" style="background:none;border:none;font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#284794;cursor:pointer;transition:color .2s;" onmouseover="this.style.color='#8496C4'" onmouseout="this.style.color='#284794'">Limpar</button>
-            </div>
-            <div id="notif-list" style="overflow-y:auto;max-height:400px;"></div>
-          </div>
-          <span class="badge-status">Online</span>
-        </div>
-      </header>
+function filtrarClientes() {
+  const search = (document.getElementById('clientes-search')?.value || '').toLowerCase();
+  const sort   = document.getElementById('clientes-sort')?.value || 'nome';
+  let lista = _clientListCache.filter(c =>
+    c.nome.toLowerCase().includes(search) || c.telefone.includes(search)
+  );
+  lista.sort((a, b) => {
+    if (sort === 'nome')    return a.nome.localeCompare(b.nome);
+    if (sort === 'visitas') return b.stats.total - a.stats.total;
+    if (sort === 'ticket')  return b.stats.ticket - a.stats.ticket;
+    if (sort === 'gasto')   return b.stats.gastoTotal - a.stats.gastoTotal;
+    if (sort === 'recente') return (b.stats.ultimaVisita || '').localeCompare(a.stats.ultimaVisita || '');
+    return 0;
+  });
 
-      <!-- DASHBOARD -->
-      <div class="tab-content active" id="tab-dashboard">
+  const el = document.getElementById('clientes-lista');
+  if (!el) return;
+  if (!lista.length) {
+    el.innerHTML = '<p style="color:#2C4E9E;font-family:Oswald,sans-serif;font-size:13px;letter-spacing:1px;padding:20px 0;">Nenhum cliente encontrado.</p>';
+    return;
+  }
 
-        <!-- FILTRO DE DATA NO TOPO DO DASHBOARD -->
-        <div id="dash-date-filter-bar" style="background:#0A1330;border:1px solid #16295C;border-radius:10px;padding:16px 22px;margin-bottom:28px;">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span style="color:#5E6E9E;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:3px;text-transform:uppercase;white-space:nowrap;">Filtrar por período</span>
-            <div style="width:1px;height:20px;background:#1B3168;flex-shrink:0;"></div>
-
-            <!-- DE -->
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">De</span>
-              <input type="date" id="dash-filter-de" onchange="renderDashboard()"
-                style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 12px;outline:none;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;cursor:pointer;color-scheme:dark;"/>
-            </div>
-
-            <span style="color:#2C4E9E;font-size:16px;">→</span>
-
-            <!-- ATÉ -->
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Até</span>
-              <input type="date" id="dash-filter-ate" onchange="renderDashboard()"
-                style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 12px;outline:none;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;cursor:pointer;color-scheme:dark;"/>
-            </div>
-
-            <div style="width:1px;height:20px;background:#1B3168;flex-shrink:0;"></div>
-
-            <!-- Atalhos rápidos -->
-            <button onclick="setDashFilterToday()"
-              style="background:#122452;border:1px solid #233F80;color:#B4BEDC;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;">
-              Hoje
-            </button>
-            <button onclick="setDashFilterWeek()"
-              style="background:#122452;border:1px solid #233F80;color:#B4BEDC;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;">
-              Essa Semana
-            </button>
-            <button onclick="setDashFilterMonth()"
-              style="background:#122452;border:1px solid #233F80;color:#B4BEDC;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;">
-              Este Mês
-            </button>
-            <button onclick="clearDashFilter()"
-              style="background:#122452;border:1px solid #233F80;color:#7183B4;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">
-              Limpar
-            </button>
-            <span id="dash-filter-label" style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#5E6E9E;margin-left:auto;white-space:nowrap;"></span>
-          </div>
-        </div>
-
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
-            <div class="stat-info">
-              <span class="stat-value" id="stat-hoje">0</span>
-              <span class="stat-label" id="stat-hoje-label">Agendamentos Hoje</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
-            <div class="stat-info">
-              <span class="stat-value" id="stat-agendados">0</span>
-              <span class="stat-label" id="stat-agendados-label">Agendados</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
-            <div class="stat-info">
-              <span class="stat-value" id="stat-confirmados">0</span>
-              <span class="stat-label" id="stat-confirmados-label">Confirmados</span>
-            </div>
-          </div>
-          <!-- Card de Receita do Período (aparece só quando há filtro) -->
-          <div class="stat-card gold" id="stat-card-receita-dia" style="display:none;">
-            <div class="stat-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M8 21h8M12 17v4M17 3H7L6 8c0 3.31 2.69 6 6 6s6-2.69 6-6l-1-5z"/><path d="M6 8H3a1 1 0 00-1 1v1a4 4 0 004 4M18 8h3a1 1 0 011 1v1a4 4 0 01-4 4"/></svg></div>
-            <div class="stat-info">
-              <span class="stat-value" id="stat-receita-dia">R$0</span>
-              <span class="stat-label" id="stat-receita-dia-label">Receita do Dia</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Horários disponíveis (por dia) -->
-        <div class="recent-section" style="margin-bottom:28px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
-            <h3 style="margin:0;">Horários Disponíveis</h3>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <button onclick="dispMudarDia(-1)" aria-label="Dia anterior" style="background:#122452;border:1px solid #233F80;color:#94A4CC;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;">‹</button>
-              <input type="date" id="disp-data" onchange="dispEscolherData(this.value)" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:7px 12px;outline:none;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;color-scheme:dark;"/>
-              <button onclick="dispMudarDia(1)" aria-label="Próximo dia" style="background:#122452;border:1px solid #233F80;color:#94A4CC;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;">›</button>
-              <button onclick="dispEscolherData('')" style="background:#122452;border:1px solid #233F80;color:#94A4CC;padding:8px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Hoje</button>
-              <button id="disp-copiar" onclick="dispCopiarLivres()" style="background:transparent;border:1px solid #EBC53166;color:#EBC531;padding:8px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Copiar livres</button>
-            </div>
-          </div>
-          <div id="disp-resumo" style="font-family:'Roboto',sans-serif;font-size:13px;color:#94A4CC;margin-bottom:12px;"></div>
-          <div id="disp-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;"></div>
-          <div id="disp-extra" style="font-family:'Roboto',sans-serif;font-size:12px;color:#e0a030;margin-top:10px;"></div>
-          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;font-family:'Roboto',sans-serif;font-size:11px;color:#5E6E9E;">
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#123a24;border:1px solid #1f9e54;margin-right:6px;"></span>Livre</span>
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#3a2c08;border:1px solid #EBC531;margin-right:6px;"></span>Ocupado</span>
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#0C1838;border:1px solid #16295C;margin-right:6px;"></span>Já passou</span>
-          </div>
-        </div>
-
-        <div class="recent-section">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;">
-            <h3 style="margin:0;" id="recent-section-title">Agendamentos Recentes</h3>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button onclick="abrirEditarReceita()" style="background:transparent;border:1px solid #EBC53166;color:#EBC531;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Editar receita</button>
-              <button onclick="abrirZerarReceitas()" style="background:transparent;border:1px solid rgba(200,60,60,0.35);color:#e05555;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;">Zerar receitas</button>
-            </div>
-          </div>
-          <div class="table-wrap" id="recent-list"></div>
-        </div>
-      </div>
-
-      <!-- AGENDAMENTOS -->
-      <div class="tab-content" id="tab-agendamentos">
-        <div class="tab-toolbar">
-          <div class="filter-group">
-            <select id="filter-status" onchange="applyFilters()">
-              <option value="">Todos os Status</option>
-              <option value="agendado">Agendado</option>
-              <option value="confirmado">Confirmado</option>
-              <option value="concluido">Concluído</option>
-              <option value="cancelado">Cancelado</option>
-            </select>
-            <input type="date" id="filter-date" onchange="applyFilters()"/>
-            <input type="text" id="filter-search" oninput="applyFilters()" placeholder="Buscar cliente..."/>
-          </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn-export" onclick="exportCSV()">Exportar CSV</button>
-            <button class="btn-export" onclick="abrirModalConcluirTodos()" style="border-color:#1f9e54;color:#2db866;">Concluir Todos</button>
-            <button class="btn-export" onclick="abrirModalAvulso()" style="border-color:#EBC531;color:#EBC531;display:flex;align-items:center;gap:7px;">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-              Atendimento Avulso
-            </button>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>Cliente</th><th>WhatsApp</th><th>Serviço</th>
-                <th>Data</th><th>Horário</th>
-                <th>Valor</th><th>Status</th><th>Ações</th>
-              </tr>
-            </thead>
-            <tbody id="agendamentos-body"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- HORÁRIOS -->
-      <div class="tab-content" id="tab-horarios">
-        <div style="max-width:800px;">
-          <div style="margin-bottom:28px;">
-            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Configurar Horários de Atendimento</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Ative os dias e defina os horários de atendimento. Você pode ativar o intervalo de almoço para bloquear aquele período. Os horários aparecem automaticamente no site com intervalos de 30 minutos.</p>
-          </div>
-          <div id="horarios-grid" style="display:flex;flex-direction:column;gap:10px;margin-bottom:32px;"></div>
-          <div style="display:flex;gap:12px;align-items:center;">
-            <button onclick="salvarHorarios()" id="btn-salvar-horarios"
-              style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 36px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">
-              Salvar Horários
-            </button>
-            <span id="horarios-status" style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
-          </div>
-          <div style="margin-top:36px;padding:20px;background:#0C1838;border:1px solid #122452;border-radius:6px;">
-            <p style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#B4BEDC;text-transform:uppercase;margin-bottom:8px;">Como funciona</p>
-            <p style="font-size:13px;color:#94A4CC;line-height:1.7;">Ao salvar, os horários ficam disponíveis no site para agendamento. Dias desativados não aparecem para o cliente. Quando o intervalo de almoço está ativo, os horários durante aquele período ficam bloqueados. O intervalo entre horários é sempre de 30 minutos.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- SERVIÇOS -->
-      <div class="tab-content" id="tab-servicos">
-        <div style="max-width:720px;">
-          <div style="margin-bottom:24px;">
-            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Valores dos Serviços</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Adicione, edite ou remova serviços. Arraste pelo ícone de pontinhos à esquerda de cada linha para mudar a ordem — é assim que eles aparecem no site. Ao salvar, os valores e a ordem passam a valer no site para os próximos agendamentos e no atendimento avulso do painel. Agendamentos que já existem mantêm os valores de quando foram feitos.</p>
-          </div>
-          <div id="servicos-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
-          <div style="margin-bottom:24px;">
-            <button onclick="adicionarServicoNovo()"
-              style="background:transparent;border:1px dashed #2C4E9E;color:#94A4CC;padding:12px 20px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;width:100%;">
-              + Adicionar Serviço
-            </button>
-          </div>
-          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-            <button onclick="salvarServicos()" id="btn-salvar-servicos"
-              style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 36px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">
-              Salvar Valores
-            </button>
-            <button onclick="restaurarPrecosPadrao()"
-              style="background:transparent;border:1px solid #233F80;color:#94A4CC;padding:14px 22px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;">
-              Voltar aos padrões
-            </button>
-            <span id="servicos-status" style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- DATAS ESPECIAIS -->
-      <div class="tab-content" id="tab-datas">
-        <div style="max-width:800px;">
-          <div style="margin-bottom:28px;">
-            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Datas Especiais de Atendimento</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Cadastre feriados ou datas específicas com horários diferenciados. Essas datas <strong style="color:#F1EAD6;">substituem</strong> a configuração semanal naquele dia — útil para feriados em que você vai abrir, ou dias normais que você vai fechar.</p>
-          </div>
-
-          <!-- Formulário para adicionar data -->
-          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;margin-bottom:28px;">
-            <p style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;margin-bottom:18px;">Adicionar Data Especial</p>
-            <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Data</span>
-                <input type="date" id="de-data"
-                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;color-scheme:dark;"/>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Descrição</span>
-                <input type="text" id="de-desc" placeholder="Ex: Natal, Aniversário da cidade..."
-                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;width:220px;font-family:'Roboto',sans-serif;"/>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Tipo</span>
-                <select id="de-tipo" onchange="toggleDETipo()"
-                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;font-family:'Roboto',sans-serif;cursor:pointer;">
-                  <option value="aberto">Aberto (horário especial)</option>
-                  <option value="fechado">Fechado (dia inteiro)</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Horários (visível só quando tipo=aberto) -->
-            <div id="de-horarios-wrap" style="display:flex;flex-wrap:wrap;gap:16px;margin-top:16px;align-items:flex-end;">
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Abertura</span>
-                <input type="time" id="de-inicio" value="08:00"
-                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 12px;color:#F1EAD6;font-size:14px;outline:none;color-scheme:dark;"/>
-              </div>
-              <span style="color:#2C4E9E;font-size:20px;padding-bottom:10px;">→</span>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Fechamento</span>
-                <input type="time" id="de-fim" value="17:00"
-                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 12px;color:#F1EAD6;font-size:14px;outline:none;color-scheme:dark;"/>
-              </div>
-              <!-- Almoço -->
-              <div style="display:flex;align-items:center;gap:8px;padding-bottom:4px;">
-                <div id="de-almoco-toggle" onclick="toggleDEAlmoco()"
-                  style="width:36px;height:20px;border-radius:10px;background:#233F80;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;">
-                  <div id="de-almoco-knob" style="width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:left .2s;"></div>
-                </div>
-                <span style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;color:#7183B4;">Intervalo de Almoço</span>
-              </div>
-              <div id="de-almoco-wrap" style="display:flex;gap:10px;align-items:flex-end;opacity:.3;pointer-events:none;">
-                <div style="display:flex;flex-direction:column;gap:4px;">
-                  <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Início pausa</span>
-                  <input type="time" id="de-almoco-inicio" value="12:00"
-                    style="background:#122452;border:1px solid #16295C;border-radius:4px;padding:8px 10px;color:#F1EAD6;font-size:13px;outline:none;color-scheme:dark;"/>
-                </div>
-                <span style="color:#2C4E9E;font-size:16px;padding-bottom:10px;">→</span>
-                <div style="display:flex;flex-direction:column;gap:4px;">
-                  <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Fim pausa</span>
-                  <input type="time" id="de-almoco-fim" value="13:00"
-                    style="background:#122452;border:1px solid #16295C;border-radius:4px;padding:8px 10px;color:#F1EAD6;font-size:13px;outline:none;color-scheme:dark;"/>
-                </div>
-              </div>
-            </div>
-
-            <button onclick="adicionarDataEspecial()"
-              style="margin-top:20px;background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:12px 28px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">
-              Adicionar Data
-            </button>
-          </div>
-
-          <!-- Lista de datas cadastradas -->
-          <div>
-            <p style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;color:#94A4CC;text-transform:uppercase;margin-bottom:12px;">Datas Cadastradas</p>
-            <div id="datas-list" style="display:flex;flex-direction:column;gap:8px;"></div>
-          </div>
-
-          <div style="margin-top:36px;padding:20px;background:#0C1838;border:1px solid #122452;border-radius:6px;">
-            <p style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#B4BEDC;text-transform:uppercase;margin-bottom:8px;">Como funciona</p>
-            <p style="font-size:13px;color:#94A4CC;line-height:1.7;">As datas especiais têm <strong style="color:#F1EAD6;">prioridade total</strong> sobre a grade semanal. Se você marcar um feriado como <em>Fechado</em>, o cliente não verá horários naquele dia mesmo que seja um dia normalmente ativo. Se marcar como <em>Aberto</em>, o cliente verá os horários especiais que você definir.</p>
-            <p style="font-size:12px;color:#7183B4;line-height:1.7;margin-top:10px;">Atenção: Se aparecer "Erro ao salvar", acesse o <strong style="color:#F1EAD6;">Firebase Console → Firestore → Regras</strong> e certifique-se que a coleção <code style="background:#0F1F45;padding:2px 6px;border-radius:3px;color:#B4BEDC;">config</code> tem permissão de escrita.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- AJUSTES -->
-      <div class="tab-content" id="tab-ajustes">
-        <div style="max-width:760px;display:flex;flex-direction:column;gap:28px;">
-
-          <!-- Dados da Barbearia -->
-          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
-            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Dados da Barbearia</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Nome, logo e WhatsApp. As mudanças aparecem no site e no painel assim que você salvar.</p>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Nome da Barbearia</span>
-                <input type="text" id="aj-nome" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;"/>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">WhatsApp (com DDD)</span>
-                <input type="tel" id="aj-whatsapp" placeholder="5585999999999" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;"/>
-              </div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Topo do site · linha 1</span>
-                <input type="text" id="aj-topo1" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Topo do site · linha 2</span>
-                <input type="text" id="aj-topo2" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Nome curto (app)</span>
-                <input type="text" id="aj-nomecurto" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
-              </div>
-            </div>
-
-            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Logo</span>
-            <div style="display:flex;align-items:center;gap:14px;margin-top:8px;margin-bottom:8px;">
-              <img id="aj-logo-preview" src="logo_emblema.png" style="width:64px;height:64px;object-fit:contain;background:#0A1330;border:1px solid #16295C;border-radius:6px;padding:6px;"/>
-              <input type="file" id="aj-logo-file" accept="image/*" style="display:none;" onchange="ajLogoSelecionada(event)"/>
-              <button onclick="document.getElementById('aj-logo-file').click()" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:10px 18px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;">Escolher Imagem</button>
-              <button onclick="ajUsarLogoPadrao()" style="background:transparent;border:1px solid #233F80;color:#94A4CC;padding:10px 18px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;">Usar a logo padrão</button>
-            </div>
-            <p style="font-size:12px;color:#5E6E9E;line-height:1.6;margin-bottom:18px;">Use uma imagem quadrada, de preferência PNG com fundo transparente. Ela aparece no topo do site e no painel.</p>
-
-            <button onclick="salvarDadosBarbearia()" id="btn-salvar-aj-dados" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Dados</button>
-            <span id="aj-dados-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
-          </div>
-
-          <!-- Letra do Nome no Topo -->
-          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
-            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Letra do Nome no Topo</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Escolha o estilo de letra do nome grande que aparece no início do site. Muda só a aparência: as palavras continuam sendo as de "Topo do site", em Dados da Barbearia.</p>
-            <div id="aj-letra-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px;"></div>
-            <button onclick="salvarLetra()" id="btn-salvar-aj-letra" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Letra</button>
-            <span id="aj-letra-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
-          </div>
-
-          <!-- Cores do Site -->
-          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
-            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Cores do Site</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Escolha as duas cores principais: destaque e fundo. O sistema ajusta todos os tons sozinho, no site e no painel.</p>
-
-            <p style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;margin-bottom:10px;">Paletas prontas</p>
-            <div id="aj-cores-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;"></div>
-
-            <div style="display:block;width:100%;clear:both;position:static;margin-bottom:18px;">
-              <button type="button" id="btn-cor-pela-logo" onclick="toggleCoresDaLogo()"
-                style="box-sizing:border-box !important;position:static !important;float:none !important;transform:none !important;top:auto !important;left:auto !important;background:transparent;border:1px dashed #2C4E9E;color:#B4BEDC;padding:12px 18px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;width:100% !important;display:flex !important;align-items:center;justify-content:center;gap:8px;margin:0 !important;">
-                <img id="btn-cor-pela-logo-mini" src="" style="width:18px;height:18px;object-fit:contain;border-radius:3px;"/>
-                <span id="btn-cor-pela-logo-texto">Escolher Cor pela Logo</span>
-              </button>
-            </div>
-
-            <div id="aj-cores-logo-painel" style="display:none;margin-bottom:8px;padding:16px;background:#0A1330;border:1px solid #16295C;border-radius:6px;">
-              <p style="font-size:12px;color:#5E6E9E;line-height:1.6;margin-bottom:14px;">O sistema identifica automaticamente as cores da logo que está em uso. Toque numa cor para usá-la como destaque ou como fundo do site.</p>
-
-              <div style="margin-bottom:14px;">
-                <p style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;margin-bottom:8px;">Usar como destaque</p>
-                <div id="aj-cores-logo-destaque" style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <span style="font-size:12px;color:#5E6E9E;">Identificando cores da logo...</span>
-                </div>
-              </div>
+  el.innerHTML = `
+    <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:8px;overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+            <th style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;padding:8px 20px;font-weight:400;text-align:left;">Cliente</th>
+            <th style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;padding:8px 4px;font-weight:400;text-align:center;width:70px;">Visitas</th>
+            <th style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;padding:8px 4px;font-weight:400;text-align:center;width:80px;">Ticket</th>
+            <th style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;padding:8px 4px;font-weight:400;text-align:center;width:90px;">Total</th>
+            <th style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;padding:8px 4px;font-weight:400;text-align:center;width:120px;">Favorito</th>
+            <th style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;padding:8px 20px 8px 4px;font-weight:400;text-align:right;width:110px;">Última Visita</th>
+            <th style="width:24px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+      ${lista.map(c => {
+        const s = c.stats;
+        const favorito   = s.servicoFavorito ? s.servicoFavorito[0] : '—';
+        const ultimaFmt  = s.ultimaVisita ? s.ultimaVisita.split('-').reverse().join('/') : '—';
+        const nascFmt    = c.nascimento ? fmtNascimento(c.nascimento) : '';
+        const anivAmanha = isAniversarioAmanha(c.nascimento);
+        const encData    = encodeURIComponent(JSON.stringify({ nome: c.nome, telefone: c.telefone, nascimento: c.nascimento || '', agendamentos: c.agendamentos }));
+        return `<tr onclick="abrirClienteDrawer('${encData}')"
+          style="background:#0C1838;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.025);${anivAmanha ? 'border-left:3px solid #EBC531;' : ''}"
+          onmouseover="this.style.background='#1b1b1b'" onmouseout="this.style.background='#0C1838'">
+          <td style="padding:13px 20px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+              <div style="width:36px;height:36px;border-radius:50%;background:${anivAmanha ? '#2a1e00' : '#122452'};border:1px solid ${anivAmanha ? '#EBC531' : '#16295C'};display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',Georgia,serif;font-size:15px;color:${anivAmanha ? '#EBC531' : '#5E6E9E'};flex-shrink:0;">${(c.nome||'?')[0].toUpperCase()}</div>
               <div>
-                <p style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;margin-bottom:8px;">Usar como fundo</p>
-                <div id="aj-cores-logo-fundo" style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <span style="font-size:12px;color:#5E6E9E;">Identificando cores da logo...</span>
-                </div>
+                <div style="font-family:'Oswald',sans-serif;font-size:14px;font-weight:500;color:#F1EAD6;">${c.nome}${anivAmanha ? '&nbsp;<span style="font-size:8px;background:#2a1e00;color:#EBC531;letter-spacing:1px;padding:2px 5px;border-radius:3px;border:1px solid #4a3800;">\uD83C\uDF82 AMANHÃ</span>' : ''}</div>
+                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#284794;margin-top:2px;">${c.telefone}${nascFmt ? ' · ' + nascFmt : ''}</div>
               </div>
             </div>
+          </td>
+          <td style="text-align:center;padding:13px 4px;">
+            <span style="font-family:'Playfair Display',Georgia,serif;font-size:20px;color:#F1EAD6;line-height:1;">${s.total}</span>
+          </td>
+          <td style="text-align:center;padding:13px 4px;">
+            <span style="font-family:'Playfair Display',Georgia,serif;font-size:18px;color:#EBC531;line-height:1;">R$${s.ticket.toFixed(0)}</span>
+          </td>
+          <td style="text-align:center;padding:13px 4px;">
+            <span style="font-family:'Playfair Display',Georgia,serif;font-size:18px;color:#F1EAD6;line-height:1;">R$${s.gastoTotal.toFixed(0)}</span>
+          </td>
+          <td style="text-align:center;padding:13px 4px;">
+            <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#7183B4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;">${favorito}</span>
+          </td>
+          <td style="text-align:right;padding:13px 20px 13px 4px;">
+            <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#4a4a4a;white-space:nowrap;">${ultimaFmt}</span>
+          </td>
+          <td style="text-align:right;padding-right:12px;color:#1B3168;font-size:15px;">›</td>
+        </tr>`;
+      }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
 
-            <div id="aj-cores-preview" style="display:flex;align-items:center;gap:12px;margin-bottom:18px;padding:12px 14px;background:#0A1330;border:1px solid #16295C;border-radius:6px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1.5px;color:#7183B4;text-transform:uppercase;">Prévia</span>
-              <span id="aj-preview-fundo" style="width:22px;height:22px;border-radius:50%;border:1px solid #233F80;flex-shrink:0;"></span>
-              <span id="aj-preview-destaque" style="width:22px;height:22px;border-radius:50%;flex-shrink:0;"></span>
-              <span id="aj-preview-hex" style="font-family:'Roboto',sans-serif;font-size:12px;color:#94A4CC;"></span>
-            </div>
+function abrirClienteDrawer(encodedData) {
+  const c = JSON.parse(decodeURIComponent(encodedData));
+  const s = calcClientStats(c.agendamentos);
+  const anivAmanha = isAniversarioAmanha(c.nascimento);
 
-            <button onclick="salvarCores()" id="btn-salvar-aj-cores" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Cores</button>
-            <span id="aj-cores-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
-          </div>
+  document.getElementById('drawer-nome').textContent = c.nome;
+  document.getElementById('drawer-tel').textContent  = c.telefone;
+  const drawerNasc = document.getElementById('drawer-nasc');
+  if (drawerNasc) drawerNasc.innerHTML = c.nascimento
+    ? fmtNascimento(c.nascimento) + (anivAmanha ? ' <span style="color:#EBC531;font-size:10px;letter-spacing:1px;">· AMANHÃ!</span>' : '')
+    : '';
 
+  const ags = [...c.agendamentos].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+  const servicosRank = Object.entries(s.servicoMap).sort((a, b) => b[1] - a[1]);
+  const tel = (c.telefone || '').replace(/\D/g, '');
+  const msgAniv = encodeURIComponent(mensagemAniversario(c.nome));
+
+  document.getElementById('drawer-content').innerHTML = `
+    ${anivAmanha && tel ? `<div style="background:#1a1208;border:1px solid #4a3800;border-radius:8px;padding:14px 16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <span style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#EBC531;">Aniversário amanhã! Que tal enviar uma mensagem?</span>
+      <a href="https://wa.me/55${tel}?text=${msgAniv}" target="_blank"
+        style="background:#1a2e1a;border:1px solid #2a4a2a;color:#4caf50;padding:8px 14px;border-radius:6px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;white-space:nowrap;">
+        Enviar Parabens →
+      </a>
+    </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      ${[
+        { icon: '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"#5E6E9E\" stroke-width=\"1.5\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M16 2v4M8 2v4M3 10h18\"/></svg>', val: s.total, label: 'Visitas' },
+        { icon: '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"#5E6E9E\" stroke-width=\"1.5\"><path d=\"M22 11.08V12a10 10 0 11-5.93-9.14\"/><polyline points=\"22 4 12 14.01 9 11.01\"/></svg>', val: s.concluidos, label: 'Concluídos' },
+        { icon: '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"#5E6E9E\" stroke-width=\"1.5\"><line x1=\"12\" y1=\"1\" x2=\"12\" y2=\"23\"/><path d=\"M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6\"/></svg>', val: 'R$' + s.gastoTotal.toFixed(2).replace('.', ','), label: 'Total Gasto' },
+        { icon: '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"#5E6E9E\" stroke-width=\"1.5\"><polyline points=\"22 12 18 12 15 21 9 3 6 12 2 12\"/></svg>', val: 'R$' + s.ticket.toFixed(2).replace('.', ','), label: 'Ticket Médio' },
+        { icon: '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"#5E6E9E\" stroke-width=\"1.5\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 3\"/></svg>', val: s.ultimaVisita ? s.ultimaVisita.split('-').reverse().join('/') : '—', label: 'Última Visita' },
+        { icon: '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"#5E6E9E\" stroke-width=\"1.5\"><path d=\"M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z\"/></svg>', val: s.servicoFavorito ? s.servicoFavorito[0].split('+')[0].trim() : '—', label: 'Serviço Favorito' },
+      ].map(m => `
+        <div style="background:#0C1838;padding:14px 16px;text-align:center;">
+          <div style="display:flex;justify-content:center;margin-bottom:6px;">${m.icon}</div>
+          <div style="font-family:'Playfair Display',Georgia,serif;font-size:18px;color:#F1EAD6;letter-spacing:1px;line-height:1;">${m.val}</div>
+          <div style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#2C4E9E;text-transform:uppercase;margin-top:4px;">${m.label}</div>
         </div>
+      `).join('')}
+    </div>
+
+    ${servicosRank.length ? `<div style="margin-bottom:24px;">
+      <p style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;margin-bottom:12px;">Serviços Mais Usados</p>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${servicosRank.map(([serv, qtd]) => {
+          const pct = Math.round((qtd / s.total) * 100);
+          return `<div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#B4BEDC;">${serv}</span>
+              <span style="font-family:'Playfair Display',Georgia,serif;font-size:14px;color:#F1EAD6;">${qtd}x</span>
+            </div>
+            <div style="background:#122452;border-radius:2px;height:3px;overflow:hidden;">
+              <div style="background:#EBC531;height:100%;width:${pct}%;"></div>
+            </div>
+          </div>`;
+        }).join('')}
       </div>
+    </div>` : ''}
 
-    </main>
-  </div>
-
-  <template id="tpl-tab-clientes">
-    <div class="tab-content" id="tab-clientes">
-
-      <!-- BANNER ANIVERSARIANTES -->
-      <div id="aniversariantes-banner" style="display:none;background:#1a1208;border:1px solid #4a3800;border-radius:10px;padding:16px 20px;margin-bottom:20px;">
-        <div style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:3px;color:#EBC531;text-transform:uppercase;margin-bottom:10px;">Aniversários Amanhã</div>
-        <div id="aniversariantes-lista" style="display:flex;flex-direction:column;gap:8px;"></div>
-      </div>
-
-      <!-- BANNER PLANOS PARA COBRAR -->
-      <div id="planos-cobrar-banner" style="display:none;background:#1a1208;border:1px solid #4a3800;border-radius:10px;padding:16px 20px;margin-bottom:20px;">
-        <div style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:3px;color:#EBC531;text-transform:uppercase;margin-bottom:10px;">Planos para Cobrar</div>
-        <div id="planos-cobrar-lista" style="display:flex;flex-direction:column;gap:8px;"></div>
-      </div>
-
-      <!-- PLANOS MENSAIS -->
-      <details id="planos-details" open style="margin-bottom:20px;">
-        <summary style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;color:#94A4CC;text-transform:uppercase;cursor:pointer;padding:14px 18px;background:#0A1330;border:1px solid #122452;border-radius:8px;list-style:none;display:flex;align-items:center;gap:8px;">
-          Clientes com Plano <span id="planos-count" style="color:#EBC531;"></span>
-        </summary>
-        <div style="background:#0A1330;border:1px solid #122452;border-top:none;border-radius:0 0 8px 8px;padding:20px 18px;">
-          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
-            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Cliente já cadastrado <em style="font-style:normal;color:#2C4E9E;">(opcional)</em></span>
-              <select id="plano-cli-select" onchange="preencherClientePlano(this.value)"
-                style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;color-scheme:dark;cursor:pointer;">
-                <option value="">Selecionar...</option>
-              </select>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Nome *</span>
-              <input type="text" id="plano-nome" placeholder="Nome e sobrenome" autocapitalize="words" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;"/>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">WhatsApp *</span>
-              <input type="tel" id="plano-tel" placeholder="85999999999" maxlength="15" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;"/>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px;min-width:170px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Plano *</span>
-              <select id="plano-tipo" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;color-scheme:dark;cursor:pointer;">
-                <option value="barba">Barba - R$50</option>
-                <option value="simples">Simples - R$50</option>
-                <option value="intermediario">Intermediário - R$90</option>
-                <option value="senior">Senior - R$130</option>
-                <option value="neto">Neto Gostoso - Vitalício</option>
-              </select>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px;min-width:150px;">
-              <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Dia do pagamento *</span>
-              <input type="date" id="plano-pago" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;color-scheme:dark;cursor:pointer;"/>
-            </div>
-            <button onclick="salvarPlanoCliente()"
-              style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:10px 24px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;white-space:nowrap;">
-              Salvar Plano
-            </button>
-            <span id="plano-status" style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;color:#5E6E9E;align-self:center;"></span>
-          </div>
-          <div style="font-family:'Roboto',sans-serif;font-size:12px;color:#5E6E9E;margin-top:12px;line-height:1.5;">
-            O vencimento é calculado automaticamente: mesmo dia do mês seguinte. Ao salvar ou registrar um pagamento, o valor do plano entra no financeiro na data do pagamento. Para renovar, use "Registrar pagamento" na lista.
-          </div>
-          <div id="planos-lista" style="margin-top:20px;display:flex;flex-direction:column;gap:8px;"></div>
-        </div>
-      </details>
-
-      <!-- CADASTRO MANUAL -->
-      <details style="margin-bottom:20px;">
-        <summary style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;color:#94A4CC;text-transform:uppercase;cursor:pointer;padding:14px 18px;background:#0A1330;border:1px solid #122452;border-radius:8px;list-style:none;display:flex;align-items:center;gap:8px;">
-          Cadastrar Cliente Manualmente
-        </summary>
-        <div style="background:#0A1330;border:1px solid #122452;border-top:none;border-radius:0 0 8px 8px;padding:20px 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
-          <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px;">
-            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Nome *</span>
-            <input type="text" id="cad-nome" placeholder="Nome e sobrenome" autocapitalize="words"
-              style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;"/>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px;">
-            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">WhatsApp *</span>
-            <input type="tel" id="cad-tel" placeholder="85999999999" maxlength="15"
-              style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;"/>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;min-width:150px;">
-            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Nascimento <em style="font-style:normal;color:#2C4E9E;">(opcional)</em></span>
-            <input type="date" id="cad-nasc"
-              style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 12px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;color-scheme:dark;cursor:pointer;"/>
-          </div>
-          <button onclick="cadastrarClienteManual()"
-            style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:10px 24px;border-radius:6px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;white-space:nowrap;">
-            Salvar Cliente
-          </button>
-          <span id="cad-status" style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;color:#5E6E9E;align-self:center;"></span>
-        </div>
-      </details>
-
-      <!-- BUSCA E ORDENAÇÃO -->
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;">
-        <input type="text" id="clientes-search" oninput="filtrarClientes()"
-          placeholder="Buscar cliente..."
-          style="background:#0F1F45;border:1px solid #233F80;border-radius:4px;padding:10px 16px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;flex:1;min-width:200px;"/>
-        <select id="clientes-sort" onchange="filtrarClientes()"
-          style="background:#0F1F45;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;outline:none;cursor:pointer;color-scheme:dark;">
-          <option value="nome">Ordenar: Nome A-Z</option>
-          <option value="visitas">Ordenar: + Visitas</option>
-          <option value="ticket">Ordenar: Maior Ticket</option>
-          <option value="gasto">Ordenar: Maior Gasto Total</option>
-          <option value="recente">Ordenar: + Recente</option>
-        </select>
-        <button onclick="abrirModalExcluirTodosClientes()"
-          style="background:transparent;border:1px solid rgba(176,48,48,0.4);color:#d45a5a;padding:10px 18px;border-radius:4px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;font-weight:700;white-space:nowrap;transition:all .2s;"
-          onmouseover="this.style.background='rgba(176,48,48,0.1)';this.style.borderColor='#d45a5a'"
-          onmouseout="this.style.background='transparent';this.style.borderColor='rgba(176,48,48,0.4)'">
-          Excluir Todos
-        </button>
-      </div>
-
-      <!-- RESUMO GERAL -->
-      <div id="clientes-resumo" style="border-radius:8px;overflow:hidden;margin-bottom:28px;"></div>
-
-      <!-- LISTA -->
-      <div id="clientes-lista"></div>
-
-      <!-- DRAWER DE HISTÓRICO -->
-      <div id="cliente-drawer" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.8);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);" onclick="fecharClienteDrawer(event)">
-        <div id="cliente-drawer-box" style="position:absolute;right:0;top:0;bottom:0;width:min(520px,100vw);background:#0A1330;border-left:1px solid #122452;overflow-y:auto;-webkit-overflow-scrolling:touch;">
-          <div style="padding:28px 28px 12px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #122452;position:sticky;top:0;background:#0A1330;z-index:1;">
+    ${ags.length ? `<div>
+      <p style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;margin-bottom:12px;">Histórico de Visitas</p>
+      <div style="display:flex;flex-direction:column;gap:1px;background:rgba(255,255,255,0.04);border-radius:6px;overflow:hidden;">
+        ${ags.map(a => `
+          <div style="background:#0C1838;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
             <div>
-              <div style="font-family:'Playfair Display',Georgia,serif;font-size:28px;letter-spacing:2px;color:#F1EAD6;" id="drawer-nome">—</div>
-              <div style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;" id="drawer-tel">—</div>
-              <div style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;color:#7183B4;margin-top:4px;" id="drawer-nasc"></div>
+              <div style="font-family:'Roboto',sans-serif;font-size:13px;color:#F1EAD6;">${a.servico || '—'}</div>
+              <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#2C4E9E;margin-top:2px;">${a.data ? a.data.split('-').reverse().join('/') : '—'} ${a.horario ? '· ' + a.horario : ''}</div>
             </div>
-            <button onclick="fecharClienteDrawer()" style="background:none;border:none;color:#5E6E9E;font-size:18px;cursor:pointer;line-height:1;padding:4px;letter-spacing:0;">&#x2715;</button>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span style="font-family:'Playfair Display',Georgia,serif;font-size:16px;color:#EBC531;">${fmtValorAgd(a)}</span>
+              ${badgeHTML(a.status)}
+              <button onclick="deleteAgendamento('${a.id}')" title="Excluir"
+                style="background:transparent;border:1px solid rgba(176,48,48,0.3);color:#d45a5a;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
+                onmouseover="this.style.background='rgba(176,48,48,0.15)'"
+                onmouseout="this.style.background='transparent'">✕</button>
+            </div>
           </div>
-          <div style="padding:24px 28px;" id="drawer-content"></div>
-        </div>
+        `).join('')}
       </div>
+    </div>` : ''}
+
+    ${tel ? `<a href="https://wa.me/55${tel}" target="_blank"
+      style="display:block;margin-top:24px;text-align:center;background:#122452;border:1px solid #233F80;color:#B4BEDC;padding:14px;border-radius:6px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;text-decoration:none;"
+      onmouseover="this.style.background='#1B3168'" onmouseout="this.style.background='#122452'">
+      Abrir WhatsApp →
+    </a>` : ''}
+
+    <div style="margin-top:32px;padding-top:20px;border-top:1px solid #122452;">
+      <button onclick="confirmarExcluirCliente('${encodeURIComponent(c.nome)}', '${(c.telefone||'').replace(/\D/g,'')}')"
+        style="width:100%;background:transparent;border:1px solid rgba(176,48,48,0.35);color:#d45a5a;padding:12px;border-radius:4px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2.5px;text-transform:uppercase;font-weight:700;transition:all .2s;"
+        onmouseover="this.style.background='rgba(176,48,48,0.1)';this.style.borderColor='#d45a5a'"
+        onmouseout="this.style.background='transparent';this.style.borderColor='rgba(176,48,48,0.35)'">
+        Excluir Este Cliente
+      </button>
     </div>
-  </template>
+  `;
 
+  document.getElementById('cliente-drawer').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
 
-  <!-- MODAL EXCLUIR CLIENTE INDIVIDUAL -->
-  <div id="excluir-cliente-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #1B3168;border-radius:2px;padding:40px 36px;max-width:380px;width:90%;text-align:center;box-shadow:0 40px 100px rgba(0,0,0,0.9);">
-      <div style="width:40px;height:1px;background:#b03030;margin:0 auto 28px;"></div>
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Excluir Cliente</h3>
-      <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#8496C4;line-height:1.7;margin-bottom:28px;">
-        Tem certeza que deseja excluir <strong id="excluir-cliente-nome" style="color:#F1EAD6;"></strong>?<br/>
-        <span style="font-size:11px;color:#5E6E9E;">Esta ação não pode ser desfeita.</span>
-      </p>
-      <div style="display:flex;gap:10px;">
-        <button onclick="fecharModalExcluirCliente()"
-          style="flex:1;padding:12px;background:transparent;border:1px solid #1B3168;border-radius:4px;color:#8496C4;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:all .2s;"
-          onmouseover="this.style.borderColor='#2C4E9E';this.style.color='#B4BEDC'"
-          onmouseout="this.style.borderColor='#1B3168';this.style.color='#8496C4'">
-          Cancelar
-        </button>
-        <button id="excluir-cliente-confirmar"
-          style="flex:1;padding:12px;background:rgba(176,48,48,0.15);border:1px solid rgba(176,48,48,0.5);border-radius:4px;color:#d45a5a;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;transition:all .2s;"
-          onmouseover="this.style.background='rgba(176,48,48,0.25)'"
-          onmouseout="this.style.background='rgba(176,48,48,0.15)'">
-          Excluir
-        </button>
+function fecharClienteDrawer(e) {
+  if (e && e.target !== document.getElementById('cliente-drawer')) return;
+  document.getElementById('cliente-drawer').style.display = 'none';
+  document.body.style.overflow = '';
+  // Close excluir-cliente modal too if open
+  const ecm = document.getElementById('excluir-cliente-modal');
+  if (ecm) ecm.style.display = 'none';
+}
+
+// Verifica aniversários ao carregar o admin (mesmo sem abrir a aba)
+async function verificarAniversariosGlobal() {
+  try {
+    const snap = await db.collection('clientes').get();
+    const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
+    const aniversariantes = [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      if (d.nascimento) {
+        const [, m, dia] = d.nascimento.split('-');
+        if (parseInt(m) === (amanha.getMonth() + 1) && parseInt(dia) === amanha.getDate()) {
+          aniversariantes.push(d);
+        }
+      }
+    });
+    if (aniversariantes.length) {
+      const nomes = aniversariantes.map(c => c.nome.split(' ')[0]).join(', ');
+      setTimeout(() => {
+        showAniversarioAlert(aniversariantes);
+        enviarNotificacaoBrowser(nomes);
+      }, 1500);
+    }
+  } catch(e) {}
+}
+
+function showAniversarioAlert(aniversariantes) {
+  // Adiciona animação CSS se não existir
+  if (!document.getElementById('aniv-alert-style')) {
+    const s = document.createElement('style');
+    s.id = 'aniv-alert-style';
+    s.textContent = '@keyframes slideInRight { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:none; } }';
+    document.head.appendChild(s);
+  }
+  let el = document.getElementById('admin-aniv-alert');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'admin-aniv-alert';
+    el.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;max-width:360px;width:calc(100vw - 40px);animation:slideInRight .35s ease;';
+    document.body.appendChild(el);
+  }
+  const lista = aniversariantes.map(c => {
+    const tel = (c.telefone || '').replace(/\D/g, '');
+    const msg = encodeURIComponent(mensagemAniversario(c.nome));
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(235,197,49,0.15);">
+      <div style="flex:1;">
+        <div style="font-family:'Oswald',sans-serif;font-size:13px;color:#F1EAD6;letter-spacing:.5px;">${c.nome}</div>
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#EBC531;">Anivers\u00e1rio amanh\u00e3!</div>
       </div>
-    </div>
-  </div>
-
-  <!-- MODAL EXCLUIR TODOS OS CLIENTES -->
-  <div id="excluir-todos-clientes-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #1B3168;border-radius:2px;padding:40px 36px;max-width:400px;width:90%;text-align:center;box-shadow:0 40px 100px rgba(0,0,0,0.9);">
-      <div style="width:40px;height:1px;background:#b03030;margin:0 auto 28px;"></div>
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Excluir Todos os Clientes</h3>
-      <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#8496C4;line-height:1.7;margin-bottom:8px;">
-        Esta ação irá excluir <strong id="excluir-todos-count" style="color:#d45a5a;"></strong> da base de dados.
-      </p>
-      <p style="font-family:'Roboto',sans-serif;font-size:12px;color:#5E6E9E;line-height:1.6;margin-bottom:28px;">
-        Os agendamentos não serão afetados. Esta ação <strong style="color:#F1EAD6;">não pode ser desfeita</strong>.
-      </p>
-      <div style="margin-bottom:24px;padding:14px 18px;background:#1a0a0a;border:1px solid rgba(176,48,48,0.25);border-radius:4px;">
-        <p style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;margin-bottom:8px;">Confirme digitando</p>
-        <input type="text" id="excluir-todos-confirm-input" placeholder="EXCLUIR TUDO"
-          style="width:100%;background:#0f0f0f;border:1px solid #1B3168;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-align:center;outline:none;"
-          oninput="validarConfirmacaoExcluirTodos()"/>
-      </div>
-      <div style="display:flex;gap:10px;">
-        <button onclick="fecharModalExcluirTodosClientes()"
-          style="flex:1;padding:12px;background:transparent;border:1px solid #1B3168;border-radius:4px;color:#8496C4;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:all .2s;"
-          onmouseover="this.style.borderColor='#2C4E9E';this.style.color='#B4BEDC'"
-          onmouseout="this.style.borderColor='#1B3168';this.style.color='#8496C4'">
-          Cancelar
-        </button>
-        <button id="excluir-todos-confirmar" disabled
-          style="flex:1;padding:12px;background:rgba(176,48,48,0.08);border:1px solid rgba(176,48,48,0.2);border-radius:4px;color:#7183B4;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:not-allowed;transition:all .2s;">
-          Excluir Tudo
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL CONCLUIR TODOS -->
-  <div id="troca-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:28px 26px;max-width:440px;width:92%;max-height:92vh;overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:6px;">Trocar plano</h3>
-      <div id="troca-cliente" style="font-family:'Oswald',sans-serif;font-size:15px;color:#EBC531;letter-spacing:.5px;"></div>
-      <div style="font-family:'Roboto',sans-serif;font-size:12px;color:#7183B4;margin:2px 0 18px;">Plano atual: <span id="troca-atual"></span></div>
-
-      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:14px;">
-        <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Novo plano</span>
-        <select id="troca-novo" onchange="atualizarTrocarPlano('plano')" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;color-scheme:dark;cursor:pointer;"></select>
-      </div>
-
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
-        <label id="troca-modo-novo" style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #233F80;border-radius:6px;cursor:pointer;">
-          <input type="radio" name="troca-modo" value="novo" checked onchange="atualizarTrocarPlano('modo')" style="margin-top:3px;accent-color:#EBC531;">
-          <span style="font-family:'Roboto',sans-serif;font-size:12px;color:#94A4CC;line-height:1.5;"><strong style="color:#F1EAD6;">Começar novo ciclo</strong><br>Cobra o valor do novo plano e o vencimento passa a ser 1 mês depois da data da troca.</span>
-        </label>
-        <label id="troca-modo-manter" style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #233F80;border-radius:6px;cursor:pointer;">
-          <input type="radio" name="troca-modo" value="manter" onchange="atualizarTrocarPlano('modo')" style="margin-top:3px;accent-color:#EBC531;">
-          <span style="font-family:'Roboto',sans-serif;font-size:12px;color:#94A4CC;line-height:1.5;"><strong style="color:#F1EAD6;">Manter o vencimento atual</strong><br>Troca agora e o vencimento continua o mesmo. Por padrão cobra só a diferença de preço (se o novo plano for mais caro).</span>
-        </label>
-      </div>
-
-      <div style="display:flex;gap:12px;margin-bottom:14px;">
-        <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
-          <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Data da troca</span>
-          <input type="date" id="troca-data" onchange="atualizarTrocarPlano('data')" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 12px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;color-scheme:dark;width:100%;"/>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
-          <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#5E6E9E;text-transform:uppercase;">Valor no financeiro (R$)</span>
-          <input type="number" id="troca-valor" min="0" step="0.01" oninput="atualizarTrocarPlano('valor')" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 12px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;width:100%;"/>
-        </div>
-      </div>
-
-      <div id="troca-resumo" style="font-family:'Roboto',sans-serif;font-size:12px;color:#94A4CC;line-height:1.6;padding:10px 12px;background:#0A1330;border:1px solid #122452;border-radius:6px;margin-bottom:6px;"></div>
-      <div id="troca-status" style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;min-height:16px;margin-bottom:12px;"></div>
-
-      <div style="display:flex;gap:12px;">
-        <button onclick="fecharTrocarPlano()" style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">Cancelar</button>
-        <button onclick="confirmarTrocarPlano()" style="flex:1;padding:12px;background:#EBC531;border:none;border-radius:6px;color:#070E24;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;">Trocar plano</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="zerar-receitas-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:30px 26px;max-width:420px;width:92%;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Zerar receitas</h3>
-      <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#94A4CC;line-height:1.6;margin-bottom:12px;">
-        Isso zera o faturamento (atendimentos concluídos e mensalidades de planos) que está no painel hoje:
-        <strong id="zerar-receitas-valor" style="color:#EBC531;"></strong>.
-      </p>
-      <p style="font-family:'Roboto',sans-serif;font-size:12px;color:#7183B4;line-height:1.6;margin-bottom:16px;">
-        Clientes, agendamentos, histórico de visitas e planos <strong style="color:#F1EAD6;">não são apagados</strong> — só o dinheiro deixa de ser contado. Atendimentos e pagamentos feitos depois disso voltam a somar normalmente. Essa ação não pode ser desfeita.
-      </p>
-      <input type="text" id="zerar-receitas-input" placeholder="Digite ZERAR para confirmar" oninput="validarZerarReceitas()" autocomplete="off"
-        style="width:100%;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:10px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;margin-bottom:8px;"/>
-      <div id="zerar-receitas-status" style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;min-height:16px;margin-bottom:10px;color:#94A4CC;"></div>
-      <div style="display:flex;gap:12px;">
-        <button onclick="fecharZerarReceitas()" style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">Cancelar</button>
-        <button id="zerar-receitas-confirmar" onclick="confirmarZerarReceitas()" disabled style="flex:1;padding:12px;background:rgba(176,48,48,0.08);border:1px solid rgba(176,48,48,0.2);border-radius:6px;color:#7183B4;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:not-allowed;">Zerar</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="editrec-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:24px 22px;max-width:680px;width:94%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:6px;">Editar receita</h3>
-      <p style="font-family:'Roboto',sans-serif;font-size:12px;color:#7183B4;line-height:1.5;margin-bottom:14px;">Corrija o valor de cada atendimento e de cada pagamento de plano. Use ✕ para tirar um item da receita (ele continua no histórico, só deixa de somar).</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-        <input type="date" id="editrec-de" onchange="renderEditarReceita()" title="De" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 10px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;color-scheme:dark;"/>
-        <input type="date" id="editrec-ate" onchange="renderEditarReceita()" title="Até" style="background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 10px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;color-scheme:dark;"/>
-        <input type="text" id="editrec-busca" oninput="renderEditarReceita()" placeholder="Buscar cliente..." style="flex:1;min-width:130px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:8px 12px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;"/>
-      </div>
-      <div id="editrec-resumo" style="font-family:'Roboto',sans-serif;font-size:12px;color:#94A4CC;margin-bottom:8px;"></div>
-      <div id="editrec-lista" style="overflow-y:auto;flex:1;min-height:120px;display:flex;flex-direction:column;gap:6px;padding-right:2px;"></div>
-      <div id="editrec-status" style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;min-height:16px;margin:10px 0 8px;color:#94A4CC;"></div>
-      <div style="display:flex;gap:12px;">
-        <button onclick="fecharEditarReceita()" style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">Cancelar</button>
-        <button id="editrec-salvar" onclick="salvarEditarReceita()" style="flex:1;padding:12px;background:#EBC531;border:none;border-radius:6px;color:#070E24;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;">Salvar alterações</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="concluir-todos-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:36px 32px;max-width:380px;width:90%;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
-      
-      <h3 style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Concluir Todos</h3>
-      <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#94A4CC;line-height:1.6;margin-bottom:28px;">
-        Isso vai marcar como <strong style="color:#1f9e54;">concluído</strong> todos os <strong id="concluir-todos-count" style="color:#F1EAD6;"></strong> agendamentos agendados e confirmados. Deseja continuar?
-      </p>
-      <div style="display:flex;gap:12px;justify-content:center;">
-        <button onclick="fecharModalConcluirTodos()"
-          style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">
-          Cancelar
-        </button>
-        <button onclick="confirmarConcluirTodos()"
-          style="flex:1;padding:12px;background:#1f9e54;border:none;border-radius:6px;color:#fff;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;">
-          Confirmar
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL CONFIRMAR AGENDAMENTO -->
-  <div id="confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
-    <div style="background:#0C1838;border:1px solid #16295C;border-radius:2px;padding:36px 32px;max-width:380px;width:90%;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.8);">
-      
-      <h3 id="confirm-modal-titulo" style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#F1EAD6;margin-bottom:10px;">Confirmar Agendamento</h3>
-      <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#94A4CC;line-height:1.6;margin-bottom:28px;">
-        Deseja enviar a mensagem <span id="confirm-modal-tipo">de confirmação</span> para <strong id="confirm-modal-nome" style="color:#F1EAD6;"></strong> pelo WhatsApp?
-      </p>
-      <div style="display:flex;gap:12px;justify-content:center;">
-        <button id="confirm-modal-nao"
-          style="flex:1;padding:12px;background:transparent;border:1px solid #233F80;border-radius:6px;color:#94A4CC;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;">
-          Não enviar
-        </button>
-        <button id="confirm-modal-sim"
-          style="flex:1;padding:12px;background:#F1EAD6;border:none;border-radius:6px;color:#070E24;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;">
-          Sim, enviar
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <script src="admin.js?v=2"></script>
-  <!-- ════════════════════════════════════════════════
-       MODAL — ATENDIMENTO AVULSO (walk-in)
-       ════════════════════════════════════════════════ -->
-  <div id="avulso-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;align-items:center;justify-content:center;padding:16px;">
-    <div style="background:#0A1330;border:1px solid #16295C;border-radius:8px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;box-shadow:0 40px 100px rgba(0,0,0,0.9);position:relative;">
-
-      <!-- Header -->
-      <div style="padding:24px 28px 18px;border-bottom:1px solid #122452;display:flex;align-items:flex-start;justify-content:space-between;position:sticky;top:0;background:#0A1330;z-index:1;">
-        <div>
-          <div style="font-family:'Playfair Display',Georgia,serif;font-size:22px;letter-spacing:2px;color:#F1EAD6;">Atendimento Avulso</div>
-          <div style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;margin-top:3px;">Cliente sem agendamento · Walk-in</div>
-        </div>
-        <button onclick="fecharModalAvulso()" style="background:none;border:none;color:#2C4E9E;font-size:20px;cursor:pointer;padding:2px 6px;line-height:1;border-radius:4px;transition:color .2s;" onmouseover="this.style.color='#F1EAD6'" onmouseout="this.style.color='#2C4E9E'">✕</button>
-      </div>
-
-      <!-- Body -->
-      <div style="padding:24px 28px;display:flex;flex-direction:column;gap:18px;">
-
-        <!-- Cliente: busca ou nome livre -->
-        <div>
-          <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Cliente</label>
-          <input type="text" id="avulso-cliente" placeholder="Nome do cliente" autocomplete="off"
-            oninput="avulsoBuscarCliente(this.value)"
-            style="width:100%;background:#0F1F45;border:1px solid #1B3168;border-radius:6px;padding:11px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;transition:border-color .2s;"
-            onfocus="this.style.borderColor='#EBC531'" onblur="this.style.borderColor='#1B3168'"/>
-          <!-- Sugestões de clientes cadastrados -->
-          <div id="avulso-sugestoes" style="display:none;background:#0C1838;border:1px solid #16295C;border-top:none;border-radius:0 0 6px 6px;overflow:hidden;max-height:180px;overflow-y:auto;"></div>
-          <input type="hidden" id="avulso-tel"/>
-        </div>
-
-        <!-- Serviço -->
-        <div>
-          <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Serviço</label>
-          <select id="avulso-servico" onchange="avulsoPreencherPreco()"
-            style="width:100%;background:#0F1F45;border:1px solid #1B3168;border-radius:6px;padding:11px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:14px;outline:none;cursor:pointer;color-scheme:dark;transition:border-color .2s;"
-            onfocus="this.style.borderColor='#EBC531'" onblur="this.style.borderColor='#1B3168'">
-            <option value="">Selecionar serviço...</option>
-          </select>
-        </div>
-
-        <!-- Valor + Data + Hora em linha -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-          <div>
-            <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Valor (R$)</label>
-            <input type="number" id="avulso-preco" placeholder="0,00" step="0.01" min="0"
-              style="width:100%;background:#0F1F45;border:1px solid #1B3168;border-radius:6px;padding:11px 14px;color:#EBC531;font-family:'Playfair Display',Georgia,serif;font-size:18px;outline:none;letter-spacing:1px;transition:border-color .2s;"
-              onfocus="this.style.borderColor='#EBC531'" onblur="this.style.borderColor='#1B3168'"/>
-          </div>
-          <div>
-            <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Data</label>
-            <input type="date" id="avulso-data"
-              style="width:100%;background:#0F1F45;border:1px solid #1B3168;border-radius:6px;padding:11px 10px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;color-scheme:dark;transition:border-color .2s;"
-              onfocus="this.style.borderColor='#EBC531'" onblur="this.style.borderColor='#1B3168'"/>
-          </div>
-          <div>
-            <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Hora</label>
-            <input type="time" id="avulso-hora"
-              style="width:100%;background:#0F1F45;border:1px solid #1B3168;border-radius:6px;padding:11px 10px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;color-scheme:dark;transition:border-color .2s;"
-              onfocus="this.style.borderColor='#EBC531'" onblur="this.style.borderColor='#1B3168'"/>
-          </div>
-        </div>
-
-        <!-- Observação -->
-        <div>
-          <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Observação <span style="color:#233F80;">(opcional)</span></label>
-          <input type="text" id="avulso-obs" placeholder="Ex: Pagamento em dinheiro, desconto aplicado..."
-            style="width:100%;background:#0F1F45;border:1px solid #1B3168;border-radius:6px;padding:11px 14px;color:#F1EAD6;font-family:'Roboto',sans-serif;font-size:13px;outline:none;transition:border-color .2s;"
-            onfocus="this.style.borderColor='#EBC531'" onblur="this.style.borderColor='#1B3168'"/>
-        </div>
-
-        <!-- Preview do registro -->
-        <div id="avulso-preview" style="display:none;background:#0d0d0d;border:1px solid #122452;border-radius:6px;padding:14px 16px;">
-          <div style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#2C4E9E;text-transform:uppercase;margin-bottom:10px;">Resumo do Atendimento</div>
-          <div id="avulso-preview-body" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;"></div>
-        </div>
-
-        <!-- Feedback -->
-        <div id="avulso-status" style="display:none;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;text-align:center;padding:10px;border-radius:4px;"></div>
-
-        <!-- Ações -->
-        <div style="display:flex;gap:10px;margin-top:4px;">
-          <button onclick="fecharModalAvulso()"
-            style="flex:1;padding:13px;background:transparent;border:1px solid #1B3168;border-radius:6px;color:#7183B4;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:all .2s;"
-            onmouseover="this.style.borderColor='#2C4E9E';this.style.color='#B4BEDC'" onmouseout="this.style.borderColor='#1B3168';this.style.color='#7183B4'">
-            Cancelar
+      ${tel ? `<a href="https://wa.me/55${tel}?text=${msg}" target="_blank"
+        style="background:#1a2e1a;border:1px solid #2a4a2a;color:#4caf50;padding:6px 12px;border-radius:5px;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;white-space:nowrap;flex-shrink:0;">
+        WhatsApp \u2192
+      </a>` : ''}
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="background:#1a1208;border:1px solid #EBC531;border-radius:10px;padding:18px 20px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;color:#EBC531;text-transform:uppercase;">\uD83C\uDF89 Anivers\u00e1rios Amanh\u00e3</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="showTab('clientes',null);syncBottomNav('bnav-clientes');document.getElementById('admin-aniv-alert').style.display='none';"
+            style="background:#EBC531;border:none;color:#070E24;padding:5px 12px;border-radius:5px;font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;font-weight:700;">
+            Ver Clientes
           </button>
-          <button id="avulso-btn-salvar" onclick="salvarAtendimentoAvulso()"
-            style="flex:2;padding:13px;background:#EBC531;border:none;border-radius:6px;color:#070E24;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2.5px;text-transform:uppercase;font-weight:700;cursor:pointer;transition:all .2s;"
-            onmouseover="this.style.background='#d4b87a'" onmouseout="this.style.background='#EBC531'">
-            Registrar Atendimento
-          </button>
+          <button onclick="document.getElementById('admin-aniv-alert').style.display='none';"
+            style="background:none;border:none;color:#7183B4;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">&times;</button>
         </div>
       </div>
+      <div>${lista}</div>
     </div>
-  </div>
+  `;
+  el.style.display = 'block';
+}
 
-  <!-- Botão flutuante no dashboard -->
-  <button id="btn-avulso-fab" onclick="abrirModalAvulso()"
-    style="display:none;position:fixed;bottom:80px;right:20px;z-index:500;background:#EBC531;border:none;border-radius:50px;padding:12px 20px;color:#070E24;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;cursor:pointer;box-shadow:0 8px 32px rgba(235,197,49,.35);align-items:center;gap:8px;transition:all .2s;"
-    onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 12px 40px rgba(235,197,49,.5)'"
-    onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 8px 32px rgba(235,197,49,.35)'">
-    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    Avulso
-  </button>
+async function enviarNotificacaoBrowser(nomes) {
+  if (!('Notification' in window)) return;
+  try {
+    let perm = Notification.permission;
+    if (perm === 'default') perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+    const n = new Notification('\uD83C\uDF82 Wellisson Barber — Anivers\u00e1rio Amanh\u00e3!', {
+      body: nomes + (nomes.includes(',') ? ' fazem' : ' faz') + ' anivers\u00e1rio amanh\u00e3. Envie uma mensagem de parab\u00e9ns!',
+      icon: 'logo.png',
+      tag: 'aniversario-vr',
+      requireInteraction: true,
+    });
+    n.onclick = () => {
+      window.focus();
+      showTab('clientes', null);
+      syncBottomNav('bnav-clientes');
+      n.close();
+    };
+  } catch(e) {}
+}
 
-  <!-- BOTTOM NAV MOBILE -->
-  <nav class="bottom-nav" id="bottom-nav">
-    <a class="bottom-nav-item active" id="bnav-dashboard" onclick="showTab('dashboard', this); syncBottomNav('bnav-dashboard')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>Dashboard
-    </a>
-    <a class="bottom-nav-item" id="bnav-agendamentos" onclick="showTab('agendamentos', this); syncBottomNav('bnav-agendamentos')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>Agenda
-    </a>
-    <a class="bottom-nav-item" id="bnav-horarios" onclick="showTab('horarios', this); syncBottomNav('bnav-horarios')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>Horários
-    </a>
-    <a class="bottom-nav-item" id="bnav-datas" onclick="showTab('datas', this); syncBottomNav('bnav-datas')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></span>Datas
-    </a>
-    <a class="bottom-nav-item" id="bnav-servicos" onclick="showTab('servicos', this); syncBottomNav('bnav-servicos')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><circle cx="7" cy="7" r="1.5"/></svg></span>Serviços
-    </a>
-    <a class="bottom-nav-item" id="bnav-clientes" onclick="showTab('clientes', this); syncBottomNav('bnav-clientes')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></span>Clientes
-    </a>
-    <a class="bottom-nav-item" id="bnav-ajustes" onclick="showTab('ajustes', this); syncBottomNav('bnav-ajustes')">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>Ajustes
-    </a>
-    <a class="bottom-nav-item" id="bnav-sair" onclick="doLogout()">
-      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></span>Sair
-    </a>
-  </nav>
+function showToast(msg, duration = 4000) { showAdminToast(msg, duration); }
+
+function showAdminToast(msg, duration = 4000) {
+  let toast = document.getElementById('admin-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'admin-toast';
+    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#2a1e00;border:1px solid #EBC531;color:#F1EAD6;padding:14px 24px;border-radius:8px;font-family:Oswald,sans-serif;font-size:13px;letter-spacing:1px;z-index:99999;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.7);';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.display = 'block';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.display = 'none'; }, duration);
+}
+
+function buildClienteMap() {
+  const map = {};
+  allAgendamentos.forEach(a => {
+    const key = (a.telefone || '').replace(/\D/g, '') || a.cliente || 'desconhecido';
+    if (!map[key]) {
+      map[key] = {
+        nome: a.cliente || '—',
+        telefone: a.telefone || '—',
+        agendamentos: [],
+      };
+    }
+    // Atualiza nome mais recente
+    if (a.cliente) map[key].nome = a.cliente;
+    map[key].agendamentos.push(a);
+  });
+  return map;
+}
+
+function formatDate(d) {
+  const [y, m, day] = d.split('-');
+  return day + '/' + m + '/' + y;
+}
+
+function badgeHTML(status) {
+  const labels = { agendado:'Agendado', confirmado:'Confirmado', concluido:'Concluido', cancelado:'Cancelado' };
+  return '<span class="badge badge-' + (status||'agendado') + '">' + (labels[status]||status) + '</span>';
+}
+
+// ── Datas Especiais ──────────────────────────────
+
+function toggleDETipo() {
+  const tipo = document.getElementById('de-tipo').value;
+  document.getElementById('de-horarios-wrap').style.display = tipo === 'aberto' ? 'flex' : 'none';
+}
+
+function toggleDEAlmoco() {
+  deAlmocoAtivo = !deAlmocoAtivo;
+  const toggle = document.getElementById('de-almoco-toggle');
+  const knob   = document.getElementById('de-almoco-knob');
+  const wrap   = document.getElementById('de-almoco-wrap');
+  toggle.style.background = deAlmocoAtivo ? '#5E6E9E' : '#1B3168';
+  knob.style.left         = deAlmocoAtivo ? '19px' : '3px';
+  wrap.style.opacity      = deAlmocoAtivo ? '1' : '.3';
+  wrap.style.pointerEvents = deAlmocoAtivo ? 'auto' : 'none';
+}
+
+async function carregarDatasEspeciais() {
+  try {
+    const doc = await db.collection('config').doc('datas_especiais').get();
+    datasEspeciais = doc.exists ? (doc.data() || {}) : {};
+  } catch(e) { datasEspeciais = {}; }
+  renderDatasLista();
+}
+
+function renderDatasLista() {
+  const el = document.getElementById('datas-list');
+  if (!el) return;
+  const keys = Object.keys(datasEspeciais).sort();
+  if (!keys.length) {
+    el.innerHTML = '<p style="color:#2C4E9E;font-family:Oswald,sans-serif;font-size:13px;letter-spacing:1px;padding:16px 0;">Nenhuma data especial cadastrada.</p>';
+    return;
+  }
+  el.innerHTML = keys.map(data => {
+    const d = datasEspeciais[data];
+    const isFechado = d.tipo === 'fechado';
+    const cor = isFechado ? '#b03030' : '#1f9e54';
+    const icone = isFechado ? '—' : '+';
+    const [y, m, day] = data.split('-');
+    const dataFmt = day + '/' + m + '/' + y;
+    let horarioInfo = isFechado ? 'Fechado' : (d.inicio + ' → ' + d.fim);
+    if (!isFechado && d.almoco) horarioInfo += ' | Almoço: ' + d.almoco_inicio + '→' + d.almoco_fim;
+    return `<div style="background:#0C1838;border:1px solid #122452;border-radius:6px;padding:14px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+      <span style="font-family:'Oswald',sans-serif;font-size:15px;color:#F1EAD6;letter-spacing:1px;min-width:100px;">${dataFmt}</span>
+      <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#B4BEDC;flex:1;">${d.desc || '—'}</span>
+      <span style="font-family:'Roboto',sans-serif;font-size:12px;color:${cor};">${icone} ${horarioInfo}</span>
+      <button onclick="removerDataEspecial('${data}')"
+        style="background:#6a1a1a;border:none;color:#F1EAD6;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;white-space:nowrap;">
+        Remover
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function adicionarDataEspecial() {
+  const data   = document.getElementById('de-data').value;
+  const desc   = document.getElementById('de-desc').value.trim();
+  const tipo   = document.getElementById('de-tipo').value;
+  const inicio = document.getElementById('de-inicio').value;
+  const fim    = document.getElementById('de-fim').value;
+  const almocoInicio = document.getElementById('de-almoco-inicio').value;
+  const almocoFim    = document.getElementById('de-almoco-fim').value;
+
+  if (!data) { alert('Selecione uma data.'); return; }
+  if (tipo === 'aberto' && (!inicio || !fim)) { alert('Defina os horários de abertura e fechamento.'); return; }
+
+  datasEspeciais[data] = {
+    desc,
+    tipo,
+    inicio:       tipo === 'aberto' ? inicio : '',
+    fim:          tipo === 'aberto' ? fim    : '',
+    almoco:       tipo === 'aberto' ? deAlmocoAtivo : false,
+    almoco_inicio: tipo === 'aberto' && deAlmocoAtivo ? almocoInicio : '',
+    almoco_fim:    tipo === 'aberto' && deAlmocoAtivo ? almocoFim    : '',
+  };
+
+  try {
+    // Usa set com merge:true para não sobrescrever outros campos do documento
+    // e funciona mesmo se o documento ainda não existir
+    const docRef = db.collection('config').doc('datas_especiais');
+    await docRef.set({ ...datasEspeciais }, { merge: true });
+    // Reset form
+    document.getElementById('de-data').value   = '';
+    document.getElementById('de-desc').value   = '';
+    document.getElementById('de-tipo').value   = 'aberto';
+    document.getElementById('de-inicio').value = '08:00';
+    document.getElementById('de-fim').value    = '17:00';
+    toggleDETipo();
+    if (deAlmocoAtivo) toggleDEAlmoco();
+    renderDatasLista();
+  } catch(e) {
+    console.error('Erro ao salvar data especial:', e);
+    alert('Erro ao salvar: ' + (e.message || e.code || 'Verifique as regras do Firestore.'));
+  }
+}
+
+async function removerDataEspecial(data) {
+  if (!confirm('Remover a data ' + formatDate(data) + '?')) return;
+  try {
+    // Usa FieldValue.delete() para remover só esse campo, sem apagar os outros
+    const update = {};
+    update[data] = firebase.firestore.FieldValue.delete();
+    await db.collection('config').doc('datas_especiais').update(update);
+    delete datasEspeciais[data];
+    renderDatasLista();
+  } catch(e) {
+    console.error('Erro ao remover data especial:', e);
+    alert('Erro ao remover: ' + (e.message || e.code || 'Verifique as regras do Firestore.'));
+  }
+}
 
   
-</body>
-</html>
+
+// ── Excluir Cliente Individual ───────────────────
+let _excluirClienteKey = null;
+
+function confirmarExcluirCliente(encodedNome, tel) {
+  const nome = decodeURIComponent(encodedNome);
+  _excluirClienteKey = tel;
+  document.getElementById('excluir-cliente-nome').textContent = nome;
+  const modal = document.getElementById('excluir-cliente-modal');
+  modal.style.display = 'flex';
+
+  document.getElementById('excluir-cliente-confirmar').onclick = async () => {
+    const btn = document.getElementById('excluir-cliente-confirmar');
+    btn.textContent = 'Excluindo...';
+    btn.disabled = true;
+    try {
+      // Salva o telefone ANTES de deletar do cache
+      const telParaBusca = (_clientesFirestore[_excluirClienteKey]?.telefone || _excluirClienteKey).replace(/\D/g, '');
+
+      // Exclui o cliente
+      await db.collection('clientes').doc(_excluirClienteKey).delete();
+      delete _clientesFirestore[_excluirClienteKey];
+
+      // Exclui todos os agendamentos do cliente (pelo telefone)
+      const tel = telParaBusca;
+      const agSnap = await db.collection('agendamentos')
+        .where('telefone', '==', tel)
+        .get();
+      const batch = db.batch();
+      agSnap.forEach(doc => batch.delete(doc.ref));
+      // Tenta também pelo formato com máscara
+      if (!agSnap.empty || true) {
+        // Busca pelos agendamentos já carregados em memória
+        const agsDoCli = allAgendamentos.filter(a =>
+          (a.telefone || '').replace(/\D/g,'') === tel
+        );
+        agsDoCli.forEach(a => batch.delete(db.collection('agendamentos').doc(a.id)));
+      }
+      await batch.commit();
+
+      fecharModalExcluirCliente();
+      fecharClienteDrawer();
+      showToast('Cliente e agendamentos excluídos.');
+      renderClientes();
+    } catch(e) {
+      btn.textContent = 'Excluir';
+      btn.disabled = false;
+      alert('Erro ao excluir: ' + (e.message || e.code));
+    }
+  };
+}
+
+function fecharModalExcluirCliente() {
+  document.getElementById('excluir-cliente-modal').style.display = 'none';
+  _excluirClienteKey = null;
+}
+
+// ── Excluir Todos os Clientes ────────────────────
+function abrirModalExcluirTodosClientes() {
+  const total = _clientListCache.length;
+  if (!total) { showToast('Nenhum cliente cadastrado.'); return; }
+  document.getElementById('excluir-todos-count').textContent =
+    total === 1 ? '1 cliente' : total + ' clientes';
+  document.getElementById('excluir-todos-confirm-input').value = '';
+  const btn = document.getElementById('excluir-todos-confirmar');
+  btn.disabled = true;
+  btn.style.background = 'rgba(176,48,48,0.08)';
+  btn.style.borderColor = 'rgba(176,48,48,0.2)';
+  btn.style.color = '#7183B4';
+  btn.style.cursor = 'not-allowed';
+  document.getElementById('excluir-todos-clientes-modal').style.display = 'flex';
+}
+
+function validarConfirmacaoExcluirTodos() {
+  const val = (document.getElementById('excluir-todos-confirm-input')?.value || '').trim().toUpperCase();
+  const btn = document.getElementById('excluir-todos-confirmar');
+  const ok = val === 'EXCLUIR TUDO';
+  btn.disabled = !ok;
+  btn.style.background    = ok ? 'rgba(176,48,48,0.2)'   : 'rgba(176,48,48,0.08)';
+  btn.style.borderColor   = ok ? 'rgba(176,48,48,0.6)'   : 'rgba(176,48,48,0.2)';
+  btn.style.color         = ok ? '#d45a5a'                : '#7183B4';
+  btn.style.cursor        = ok ? 'pointer'                : 'not-allowed';
+
+  if (ok) {
+    btn.onclick = async () => {
+      btn.textContent = 'Excluindo...';
+      btn.disabled = true;
+      try {
+        const snap = await db.collection('clientes').get();
+        const batch = db.batch();
+        snap.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        _clientesFirestore = {};
+        fecharModalExcluirTodosClientes();
+        showToast('Todos os clientes foram excluídos.');
+        renderClientes();
+      } catch(e) {
+        btn.textContent = 'Excluir Tudo';
+        btn.disabled = false;
+        alert('Erro ao excluir: ' + (e.message || e.code));
+      }
+    };
+  }
+}
+
+function fecharModalExcluirTodosClientes() {
+  document.getElementById('excluir-todos-clientes-modal').style.display = 'none';
+}
+
+
+// ── Sistema de Notificações ──────────────────────
+
+function notificarNovoAgendamento(a) {
+  const nome    = a.cliente || 'Cliente';
+  const servico = a.servico || 'Serviço';
+  const data    = a.data    ? a.data.split('-').reverse().join('/') : '';
+  const hora    = a.horario || '';
+
+  // Adiciona à lista interna
+  const notif = {
+    id:   a.id,
+    nome, servico, data, hora,
+    ts:   Date.now(),
+    lida: false,
+  };
+  _notificacoes.unshift(notif);
+
+  // Atualiza badge
+  atualizarBadgeNotif();
+
+  // Toca som sutil (beep via AudioContext)
+  tocarSomNotificacao();
+
+  // Toast customizado de novo agendamento
+  showToastAgendamento(nome, servico, data, hora);
+
+  // Notificação do browser (se permitido)
+  if (Notification.permission === 'granted') {
+    new Notification('Novo Agendamento — Wellisson Barber', {
+      body: nome + ' · ' + servico + (data ? ' · ' + data : '') + (hora ? ' às ' + hora : ''),
+      icon: 'logo.png',
+      tag:  'vr-agendamento-' + a.id,
+      silent: false,
+    });
+  }
+
+  // Renderiza painel
+  renderNotifPanel();
+}
+
+function atualizarBadgeNotif() {
+  const naoLidas = _notificacoes.filter(n => !n.lida).length;
+  const badge = document.getElementById('notif-badge');
+  const icon  = document.getElementById('bell-icon');
+  if (!badge || !icon) return;
+  if (naoLidas > 0) {
+    badge.style.display = 'block';
+    icon.querySelector('path').setAttribute('stroke', '#F1EAD6');
+  } else {
+    badge.style.display = 'none';
+    icon.querySelector('path').setAttribute('stroke', '#8496C4');
+  }
+}
+
+function renderNotifPanel() {
+  const el = document.getElementById('notif-list');
+  if (!el) return;
+  if (!_notificacoes.length) {
+    el.innerHTML = '<div style="padding:28px 18px;text-align:center;font-family:Oswald,sans-serif;font-size:11px;letter-spacing:2px;color:#1E3874;text-transform:uppercase;">Nenhuma notificação</div>';
+    return;
+  }
+  el.innerHTML = _notificacoes.map(n => {
+    const ago = formatAgo(n.ts);
+    const bgNormal = n.lida ? 'transparent' : 'rgba(255,255,255,0.025)';
+    const dotColor = n.lida ? '#1E3874' : '#d45a5a';
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:14px 18px;border-bottom:1px solid #0F1F45;cursor:pointer;background:' + bgNormal + ';transition:background .2s;display:flex;gap:12px;align-items:flex-start;';
+    div.onmouseover = function() { this.style.background = 'rgba(255,255,255,0.04)'; };
+    div.onmouseout  = function() { this.style.background = bgNormal; };
+    div.onclick     = function() { irParaAgendamento(n.id); };
+    div.innerHTML = '<div style="width:6px;height:6px;border-radius:50%;background:' + dotColor + ';flex-shrink:0;margin-top:5px;"></div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-family:Oswald,sans-serif;font-size:13px;color:#F1EAD6;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + n.nome + '</div>' +
+        '<div style="font-family:Roboto,sans-serif;font-size:12px;color:#5E6E9E;margin-top:2px;">' + n.servico + (n.data ? ' · ' + n.data : '') + (n.hora ? ' às ' + n.hora : '') + '</div>' +
+        '<div style="font-family:Roboto,sans-serif;font-size:10px;color:#1E3874;margin-top:4px;letter-spacing:0.5px;">' + ago + '</div>' +
+      '</div>';
+    return div.outerHTML;
+  }).join('');
+}
+
+function formatAgo(ts) {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60)  return 'agora mesmo';
+  if (diff < 3600) return Math.floor(diff / 60) + ' min atrás';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h atrás';
+  return Math.floor(diff / 86400) + 'd atrás';
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notif-panel');
+  if (!panel) return;
+  _notifPanelOpen = !_notifPanelOpen;
+  panel.style.display = _notifPanelOpen ? 'flex' : 'none';
+  if (_notifPanelOpen) {
+    // Marcar todas como lidas ao abrir
+    _notificacoes.forEach(n => n.lida = true);
+    atualizarBadgeNotif();
+    renderNotifPanel();
+    // Fechar ao clicar fora
+    setTimeout(() => {
+      document.addEventListener('click', fecharNotifPanelFora, { once: true });
+    }, 10);
+  }
+}
+
+function fecharNotifPanelFora(e) {
+  const panel = document.getElementById('notif-panel');
+  const bell  = document.getElementById('notif-bell');
+  if (panel && !panel.contains(e.target) && !bell.contains(e.target)) {
+    panel.style.display = 'none';
+    _notifPanelOpen = false;
+  }
+}
+
+function limparNotificacoes() {
+  _notificacoes = [];
+  atualizarBadgeNotif();
+  renderNotifPanel();
+}
+
+function irParaAgendamento(id) {
+  const panel = document.getElementById('notif-panel');
+  if (panel) panel.style.display = 'none';
+  _notifPanelOpen = false;
+  // Vai para aba de agendamentos e destaca o item
+  const navItem = document.querySelector('.nav-item[onclick*="agendamentos"]');
+  showTab('agendamentos', navItem);
+  // Destaca linha após renderizar
+  setTimeout(() => {
+    const rows = document.querySelectorAll('#agendamentos-body tr');
+    rows.forEach(row => {
+      if (row.dataset.id === id) {
+        row.style.background = 'rgba(212,90,90,0.1)';
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => { row.style.background = ''; }, 2500);
+      }
+    });
+  }, 300);
+}
+
+function showToastAgendamento(nome, servico, data, hora) {
+  let toast = document.getElementById('notif-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'notif-toast';
+    document.body.appendChild(toast);
+  }
+  toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#0C1838;border:1px solid #16295C;border-left:3px solid #d45a5a;color:#F1EAD6;padding:16px 20px;border-radius:4px;font-family:Oswald,sans-serif;z-index:99999;max-width:300px;box-shadow:0 16px 48px rgba(0,0,0,0.8);cursor:pointer;transition:opacity .3s;';
+  toast.innerHTML = `
+    <div style="font-size:9px;letter-spacing:3px;text-transform:uppercase;color:#d45a5a;margin-bottom:6px;">Novo Agendamento</div>
+    <div style="font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">${nome}</div>
+    <div style="font-size:12px;color:#5E6E9E;font-family:Roboto,sans-serif;">${servico}${data ? ' · ' + data : ''}${hora ? ' às ' + hora : ''}</div>
+  `;
+  toast.style.display = 'block';
+  toast.style.opacity = '1';
+  toast.onclick = () => { toast.style.opacity = '0'; setTimeout(() => { toast.style.display='none'; }, 300); };
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => { toast.style.display = 'none'; }, 300);
+  }, 7000);
+}
+
+function tocarSomNotificacao() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    const notas = [
+      { freq: 520, t: 0.00, dur: 0.13 },
+      { freq: 660, t: 0.17, dur: 0.13 },
+      { freq: 880, t: 0.34, dur: 0.25 },
+    ];
+    notas.forEach(({ freq, t, dur }) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + t);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+      gain.gain.linearRampToValueAtTime(0.4,  ctx.currentTime + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + dur);
+      osc.start(ctx.currentTime + t);
+      osc.stop(ctx.currentTime + t + dur + 0.05);
+    });
+  } catch(e) { console.warn('Som:', e); }
+}
+
+// ── FCM: pede permissão e registra token ─────────
+// Retorna: 'ok' | 'negado' | 'indisponivel' | 'erro'
+let _onMessageRegistrado = false;
+async function iniciarPushNotifications() {
+  if (!_messaging) return 'indisponivel';
+  if (!FCM_VAPID_KEY) { console.warn('Push desativado: falta a chave VAPID.'); return 'indisponivel'; }
+  if (!('Notification' in window)) return 'indisponivel';
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      console.warn('Notificação negada pelo usuário.');
+      atualizarBotaoPush();
+      return 'negado';
+    }
+    const reg = await navigator.serviceWorker.register('./firebase-messaging-sw.js');
+    _fcmToken = await _messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (_fcmToken) {
+      // Salva o token no Firestore para uso futuro
+      await db.collection('_config').doc('fcmTokens').set(
+        { [_fcmToken]: true }, { merge: true }
+      );
+      console.log('FCM token registrado.');
+    }
+    // Mensagens quando app está em foreground
+    if (!_onMessageRegistrado) {
+      _onMessageRegistrado = true;
+      _messaging.onMessage(payload => {
+        const { title, body } = payload.notification || {};
+        tocarSomNotificacao();
+        if (title) {
+          const n = payload.notification;
+          adicionarNotifUI({ nome: n.body || '', servico: '', data: '', hora: '', ts: Date.now(), lida: false, id: Date.now().toString() });
+        }
+      });
+    }
+    atualizarBotaoPush();
+    return _fcmToken ? 'ok' : 'erro';
+  } catch(e) {
+    console.warn('Erro FCM:', e);
+    return 'erro';
+  }
+}
+
+// Mostra o botão só quando as notificações ainda não estão ativas
+function atualizarBotaoPush() {
+  const btn = document.getElementById('btn-ativar-push');
+  if (!btn) return;
+  const ativo = ('Notification' in window) && Notification.permission === 'granted' && !!_fcmToken;
+  btn.style.display = ativo ? 'none' : 'inline-block';
+}
+
+// Chamado pelo toque no botão "Ativar notificações"
+async function ativarNotificacoes() {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const instalado = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (ios && !instalado) {
+    showToast('No iPhone: toque em Compartilhar > Adicionar à Tela de Início e abra o painel pelo ícone.', 8000);
+    return;
+  }
+  if (!('Notification' in window)) {
+    showToast('Este navegador não suporta notificações.', 6000);
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    showToast('Notificações bloqueadas. Ative em Ajustes > Notificações do aparelho.', 8000);
+    return;
+  }
+  const r = await iniciarPushNotifications();
+  if (r === 'ok') showToast('Notificações ativadas!');
+  else if (r === 'negado') showToast('Permissão negada. Ative em Ajustes > Notificações.', 7000);
+  else showToast('Não foi possível ativar as notificações neste aparelho.', 6000);
+  atualizarBotaoPush();
+}
+
+function adicionarNotifUI(notif) {
+  _notificacoes.unshift(notif);
+  atualizarBadgeNotif();
+  renderNotifPanel();
+}
+
+// Solicita permissão de notificação ao iniciar o admin
+function solicitarPermissaoNotificacao() {
+  // No iPhone o pedido só funciona a partir de um toque: use o botão "Ativar notificações"
+  if (/iPad|iPhone|iPod/.test(navigator.userAgent)) return;
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+// ── ATENDIMENTO AVULSO (walk-in) ─────────────────────────────────────
+
+async function abrirModalAvulso() {
+  // Garante que os clientes estejam carregados para o autocomplete
+  if (!Object.keys(_clientesFirestore).length) {
+    try { await carregarClientesFirestore(); } catch(e) {}
+  }
+
+  const modal = document.getElementById('avulso-modal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  // Preenche o select de serviços
+  const sel = document.getElementById('avulso-servico');
+  {
+    while (sel.options.length > 1) sel.remove(1);   // recria com os preços atuais
+    SERVICES.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name + ' — R$' + s.price.toFixed(2).replace('.', ',');
+      opt.dataset.price = s.price;
+      opt.dataset.name  = s.name;
+      sel.appendChild(opt);
+    });
+  }
+
+  // Data e hora padrão = agora
+  const now  = new Date();
+  const yyyy = now.getFullYear();
+  const mm   = String(now.getMonth() + 1).padStart(2, '0');
+  const dd   = String(now.getDate()).padStart(2, '0');
+  const hh   = String(now.getHours()).padStart(2, '0');
+  const mi   = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('avulso-data').value = yyyy + '-' + mm + '-' + dd;
+  document.getElementById('avulso-hora').value = hh + ':' + mi;
+
+  // Limpa campos
+  document.getElementById('avulso-cliente').value = '';
+  document.getElementById('avulso-tel').value     = '';
+  document.getElementById('avulso-preco').value   = '';
+  document.getElementById('avulso-obs').value     = '';
+  document.getElementById('avulso-servico').value = '';
+  document.getElementById('avulso-sugestoes').style.display = 'none';
+  document.getElementById('avulso-preview').style.display   = 'none';
+  document.getElementById('avulso-status').style.display    = 'none';
+
+  const btn = document.getElementById('avulso-btn-salvar');
+  btn.textContent = 'Registrar Atendimento';
+  btn.disabled = false;
+
+  setTimeout(() => document.getElementById('avulso-cliente').focus(), 100);
+}
+
+function fecharModalAvulso() {
+  document.getElementById('avulso-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// Fecha modal ao clicar no backdrop
+document.getElementById('avulso-modal') && document.getElementById('avulso-modal').addEventListener('click', function(e) {
+  if (e.target === this) fecharModalAvulso();
+});
+
+function avulsoBuscarCliente(q) {
+  const sug = document.getElementById('avulso-sugestoes');
+  if (!q || q.length < 2) { sug.style.display = 'none'; return; }
+  const lower = q.toLowerCase();
+  const matches = Object.values(_clientesFirestore)
+    .filter(c => c.nome && c.nome.toLowerCase().includes(lower))
+    .slice(0, 6);
+  if (!matches.length) { sug.style.display = 'none'; return; }
+  sug.style.display = 'block';
+  sug.innerHTML = matches.map(c => `
+    <div onclick="avulsoSelecionarCliente('${encodeURIComponent(c.nome)}','${(c.telefone||'').replace(/\D/g,'')}' )"
+      style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .15s;"
+      onmouseover="this.style.background='#202020'" onmouseout="this.style.background='transparent'">
+      <div style="width:30px;height:30px;border-radius:50%;background:#122452;border:1px solid #1B3168;display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',Georgia,serif;font-size:14px;color:#5E6E9E;flex-shrink:0;">${(c.nome||'?')[0].toUpperCase()}</div>
+      <div>
+        <div style="font-family:'Oswald',sans-serif;font-size:13px;color:#F1EAD6;">${c.nome}</div>
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#2C4E9E;">${c.telefone || ''}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function avulsoSelecionarCliente(nomeEnc, tel) {
+  const nome = decodeURIComponent(nomeEnc);
+  document.getElementById('avulso-cliente').value = nome;
+  document.getElementById('avulso-tel').value     = tel;
+  document.getElementById('avulso-sugestoes').style.display = 'none';
+  avulsoAtualizarPreview();
+}
+
+function avulsoPreencherPreco() {
+  const sel = document.getElementById('avulso-servico');
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.price) {
+    document.getElementById('avulso-preco').value = opt.dataset.price;
+  }
+  avulsoAtualizarPreview();
+}
+
+function avulsoAtualizarPreview() {
+  const nome    = document.getElementById('avulso-cliente').value.trim();
+  const sel     = document.getElementById('avulso-servico');
+  const svcName = sel.options[sel.selectedIndex]?.dataset?.name || sel.value;
+  const preco   = parseFloat(document.getElementById('avulso-preco').value) || 0;
+  const data    = document.getElementById('avulso-data').value;
+  const hora    = document.getElementById('avulso-hora').value;
+  const obs     = document.getElementById('avulso-obs').value.trim();
+
+  const preview = document.getElementById('avulso-preview');
+  if (!nome && !svcName) { preview.style.display = 'none'; return; }
+
+  preview.style.display = 'block';
+  const dataFmt = data ? data.split('-').reverse().join('/') : '--';
+  const items = [
+    { l: 'Cliente',  v: nome   || '--' },
+    { l: 'Serviço',  v: svcName || '--' },
+    { l: 'Valor',    v: preco ? 'R$' + preco.toFixed(2).replace('.', ',') : '--' },
+    { l: 'Data',     v: dataFmt + (hora ? ' às ' + hora : '') },
+    ...(obs ? [{ l: 'Obs', v: obs }] : []),
+  ];
+  document.getElementById('avulso-preview-body').innerHTML = items.map(i => `
+    <div>
+      <div style="font-family:'Oswald',sans-serif;font-size:8px;letter-spacing:2px;color:#2C4E9E;text-transform:uppercase;margin-bottom:2px;">${i.l}</div>
+      <div style="font-family:'Roboto',sans-serif;font-size:12px;color:#B4BEDC;">${i.v}</div>
+    </div>
+  `).join('');
+}
+
+// Atualiza preview em tempo real nos outros campos
+['avulso-cliente','avulso-preco','avulso-data','avulso-hora','avulso-obs'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', avulsoAtualizarPreview);
+});
+
+async function salvarAtendimentoAvulso() {
+  const nome   = document.getElementById('avulso-cliente').value.trim();
+  const tel    = document.getElementById('avulso-tel').value.trim();
+  const sel    = document.getElementById('avulso-servico');
+  const svcOpt = sel.options[sel.selectedIndex];
+  const svcName = svcOpt?.dataset?.name || sel.value;
+  const preco   = parseFloat(document.getElementById('avulso-preco').value) || 0;
+  const data    = document.getElementById('avulso-data').value;
+  const hora    = document.getElementById('avulso-hora').value;
+  const obs     = document.getElementById('avulso-obs').value.trim();
+
+  const statusEl = document.getElementById('avulso-status');
+  function mostrarErro(msg) {
+    statusEl.style.display = 'block';
+    statusEl.style.background = 'rgba(176,48,48,0.1)';
+    statusEl.style.color = '#d45a5a';
+    statusEl.style.border = '1px solid rgba(176,48,48,0.25)';
+    statusEl.textContent = msg;
+  }
+
+  if (!nome)    { mostrarErro('Informe o nome do cliente.'); return; }
+  if (!svcName) { mostrarErro('Selecione um serviço.'); return; }
+  if (!data)    { mostrarErro('Informe a data do atendimento.'); return; }
+
+  const btn = document.getElementById('avulso-btn-salvar');
+  btn.textContent = 'Salvando...';
+  btn.disabled = true;
+  statusEl.style.display = 'none';
+
+  try {
+    const payload = {
+      cliente:     nome,
+      telefone:    tel || '',
+      servico:     svcName,
+      preco:       preco,
+      data:        data,
+      horario:     hora || '',
+      status:      'concluido',
+      origem:      'avulso',
+      obs:         obs,
+      criadoEm:    firebase.firestore.FieldValue.serverTimestamp(),
+      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+
+    await db.collection('agendamentos').add(payload);
+
+    // Atualiza histórico do cliente no Firestore (se tiver telefone)
+    if (tel) {
+      const clienteRef = db.collection('clientes').doc(tel);
+      await clienteRef.set({ nome, telefone: tel }, { merge: true });
+    }
+
+    // Feedback de sucesso
+    statusEl.style.display = 'block';
+    statusEl.style.background = 'rgba(31,158,84,0.1)';
+    statusEl.style.color = '#2db866';
+    statusEl.style.border = '1px solid rgba(31,158,84,0.25)';
+    statusEl.textContent = '✓ Atendimento registrado com sucesso!';
+    btn.textContent = '✓ Registrado';
+
+    setTimeout(() => fecharModalAvulso(), 1400);
+
+  } catch(e) {
+    mostrarErro('Erro ao salvar: ' + (e.message || e));
+    btn.textContent = 'Registrar Atendimento';
+    btn.disabled = false;
+  }
+}
+
+// Fecha ao pressionar ESC
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('avulso-modal')?.style.display === 'flex') fecharModalAvulso();
+  }
+});
+
+// Botão flutuante: aparece só na aba de agendamentos/dashboard no mobile
+function gerenciarFab(tab) {
+  const fab = document.getElementById('btn-avulso-fab');
+  if (!fab) return;
+  fab.style.display = (tab === 'agendamentos' || tab === 'dashboard') ? 'flex' : 'none';
+}
+
+// Registro do Service Worker (PWA)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .then(reg => console.log("SW registrado:", reg.scope))
+      .catch(err => console.warn("SW falhou:", err));
+  });
+}
+
+// Inicia push notifications após login
+document.addEventListener('click', function unlockOnce() {
+  if (!auth.currentUser) return; // espera o login para salvar o token
+  document.removeEventListener('click', unlockOnce);
+  iniciarPushNotifications();
+});
