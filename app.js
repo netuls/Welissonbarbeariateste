@@ -2,8 +2,9 @@
 //  WELLISSON BARBER — App Principal (Cliente)
 // ================================================
 
-const WHATSAPP_NUMBER = '5585982358729';
-const WHATSAPP_NOTIFY = '5585982358729';
+// WhatsApp agora vem dos dados da barbearia (config.js / Firestore config/barbearia).
+// As constantes ficam aqui só como valor inicial, antes da config carregar.
+function whatsappNumero() { return (typeof BARBEARIA !== 'undefined' && BARBEARIA.whatsapp) || '5585982358729'; }
 
 // ─── Modo demonstração ──────────────────────────────
 // true  = nada é salvo no Firebase e nenhuma mensagem de WhatsApp é aberta;
@@ -36,27 +37,37 @@ const SERVICES = [
 // em seguida buscamos o valor atual no Firebase e atualizamos a tela se mudou.
 const PRECOS_CACHE_KEY = 'wb_precos_servicos_v1';
 
-// Aplica { id: preço } sobre SERVICES. Retorna true se algum preço mudou.
-function aplicarPrecosServicos(precos) {
+// Aplica { id: preço } e { id: duração } sobre SERVICES. Retorna true se algo mudou.
+function aplicarPrecosServicos(precos, duracoes) {
   let mudou = false;
-  if (!precos || typeof precos !== 'object') return mudou;
-  SERVICES.forEach(sv => {
-    const v = Number(precos[sv.id]);
-    if (precos[sv.id] != null && !isNaN(v) && v >= 0 && v !== sv.price) { sv.price = v; mudou = true; }
-  });
+  if (precos && typeof precos === 'object') {
+    SERVICES.forEach(sv => {
+      const v = Number(precos[sv.id]);
+      if (precos[sv.id] != null && !isNaN(v) && v >= 0 && v !== sv.price) { sv.price = v; mudou = true; }
+    });
+  }
+  if (duracoes && typeof duracoes === 'object') {
+    SERVICES.forEach(sv => {
+      const d = Number(duracoes[sv.id]);
+      if (duracoes[sv.id] != null && !isNaN(d) && d > 0 && d !== sv.duracao) { sv.duracao = d; mudou = true; }
+    });
+  }
   return mudou;
 }
 try {
-  aplicarPrecosServicos(JSON.parse(localStorage.getItem(PRECOS_CACHE_KEY) || 'null'));
+  const cache = JSON.parse(localStorage.getItem(PRECOS_CACHE_KEY) || 'null');
+  if (cache) aplicarPrecosServicos(cache.precos || cache, cache.duracoes);
 } catch (e) { /* sem cache: segue com os preços padrão */ }
 
 async function carregarPrecosServicos() {
   try {
     const doc = await firebase.firestore().collection('config').doc('servicos').get();
     if (!doc.exists) return;
-    const precos = (doc.data() || {}).precos || {};
-    const mudou = aplicarPrecosServicos(precos);
-    try { localStorage.setItem(PRECOS_CACHE_KEY, JSON.stringify(precos)); } catch (e) {}
+    const dados = doc.data() || {};
+    const precos = dados.precos || {};
+    const duracoes = dados.duracoes || {};
+    const mudou = aplicarPrecosServicos(precos, duracoes);
+    try { localStorage.setItem(PRECOS_CACHE_KEY, JSON.stringify({ precos, duracoes })); } catch (e) {}
     if (!mudou) return;
     renderServices();
     renderServiceOptions();
@@ -491,7 +502,7 @@ window.cancelarAgendamento = async function(id, servico, data, horario) {
     const msg = encodeURIComponent(
       `*Cancelamento*\n\n*Cliente:* ${currentUser ? currentUser.nome : ''}\n*Serviço:* ${servico}\n*Data:* ${formatDate(data)}\n*Horário:* ${horario}`
     );
-    window.open(`https://wa.me/${WHATSAPP_NOTIFY}?text=${msg}`, '_blank');
+    window.open(`https://wa.me/${whatsappNumero()}?text=${msg}`, '_blank');
 
     if (card) card.remove();
     showToast('Agendamento cancelado.');
@@ -551,7 +562,7 @@ window.openPlanModal = function(planId, planName, price) {
     let msg = `Olá! Tenho interesse no *Plano ${planName}* da Wellisson Barber (R$${price}/mês).`;
     if (duvida) msg += `\n\nMinha dúvida: ${duvida}`;
     else msg += `\n\nPode me passar mais informações?`;
-    window.open(`https://wa.me/${WHATSAPP_NOTIFY}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/${whatsappNumero()}?text=${encodeURIComponent(msg)}`, '_blank');
     closePlanModal();
   };
   modal.classList.add('open');
@@ -964,7 +975,7 @@ function sendWhatsAppNotification() {
       : '*Valor:* R$' + Number(sel.price).toFixed(2).replace('.', ','),
   ];
   if (state.obs) lines.push('*Obs:* ' + state.obs);
-  window.open(`https://wa.me/${WHATSAPP_NOTIFY}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
+  window.open(`https://wa.me/${whatsappNumero()}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
 }
 
 function sendClientConfirmation() {
