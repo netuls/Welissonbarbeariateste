@@ -54,9 +54,26 @@ function aplicarPrecosServicos(precos, duracoes) {
   }
   return mudou;
 }
+// A lista completa vinda do painel é a fonte da verdade (inclui serviços novos ou removidos).
+function aplicarListaServicos(lista) {
+  if (!Array.isArray(lista) || !lista.length) return false;
+  const validos = lista.filter(item => item && item.id && item.name);
+  if (!validos.length) return false;
+  const novaLista = validos.map(item => ({
+    id: item.id, name: item.name,
+    price: Number(item.price) >= 0 ? Number(item.price) : 0,
+    duracao: Number(item.duracao) > 0 ? Number(item.duracao) : 30,
+  }));
+  const mudou = JSON.stringify(novaLista) !== JSON.stringify(SERVICES.map(s => ({ id: s.id, name: s.name, price: s.price, duracao: s.duracao })));
+  if (mudou) { SERVICES.length = 0; novaLista.forEach(s => SERVICES.push(s)); }
+  return mudou;
+}
 try {
   const cache = JSON.parse(localStorage.getItem(PRECOS_CACHE_KEY) || 'null');
-  if (cache) aplicarPrecosServicos(cache.precos || cache, cache.duracoes);
+  if (cache) {
+    if (Array.isArray(cache.lista) && cache.lista.length) aplicarListaServicos(cache.lista);
+    else aplicarPrecosServicos(cache.precos || cache, cache.duracoes);
+  }
 } catch (e) { /* sem cache: segue com os preços padrão */ }
 
 async function carregarPrecosServicos() {
@@ -66,8 +83,10 @@ async function carregarPrecosServicos() {
     const dados = doc.data() || {};
     const precos = dados.precos || {};
     const duracoes = dados.duracoes || {};
-    const mudou = aplicarPrecosServicos(precos, duracoes);
-    try { localStorage.setItem(PRECOS_CACHE_KEY, JSON.stringify({ precos, duracoes })); } catch (e) {}
+    const mudou = Array.isArray(dados.lista) && dados.lista.length
+      ? aplicarListaServicos(dados.lista)
+      : aplicarPrecosServicos(precos, duracoes);
+    try { localStorage.setItem(PRECOS_CACHE_KEY, JSON.stringify({ precos, duracoes, lista: dados.lista || null })); } catch (e) {}
     if (!mudou) return;
     renderServices();
     renderServiceOptions();
