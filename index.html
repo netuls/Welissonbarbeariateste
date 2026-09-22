@@ -27,15 +27,9 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="config.js"></script>
   <script>
-    firebase.initializeApp({
-      apiKey: "AIzaSyA7oHFbbLaMi5Ptwic0o4cqvuZN1jD039M",
-      authDomain: "welisson-77143.firebaseapp.com",
-      projectId: "welisson-77143",
-      storageBucket: "welisson-77143.firebasestorage.app",
-      messagingSenderId: "120956065574",
-      appId: "1:120956065574:web:40ce021fa58845c19093e7"
-    });
+    firebase.initializeApp(FIREBASE_CONFIG);
   </script>
 
   <style>
@@ -78,16 +72,20 @@
     .hero-name { display: block; text-align: center; margin-top: 14px; line-height: 1; }
     .hero-title .hero-name-top {
       display: block; margin: 0;
-      font-family: 'Oswald', sans-serif; font-weight: 400;
-      font-size: clamp(30px, 8.5vw, 48px); letter-spacing: 7px;
+      font-family: var(--hero-top-font, 'Oswald', sans-serif);
+      font-style: var(--hero-top-style, normal);
+      font-weight: var(--hero-top-weight, 400);
+      font-size: clamp(30px, 8.5vw, 48px); letter-spacing: var(--hero-top-spacing, 7px);
       text-transform: uppercase; color: #F1EAD6;
       text-shadow: 0 2px 0 rgba(0,0,0,0.55), 0 6px 22px rgba(0,0,0,0.75);
     }
     .hero-title .hero-name-bottom {
       display: block; margin: 8px 0 0;
-      font-family: 'Playfair Display', Georgia, serif; font-style: italic; font-weight: 700;
-      font-size: clamp(44px, 12.5vw, 72px); letter-spacing: 8px;
-      text-transform: uppercase; color: #EBC531;
+      font-family: var(--hero-bottom-font, 'Playfair Display', Georgia, serif);
+      font-style: var(--hero-bottom-style, italic);
+      font-weight: var(--hero-bottom-weight, 700);
+      font-size: clamp(44px, 12.5vw, 72px); letter-spacing: var(--hero-bottom-spacing, 8px);
+      text-transform: uppercase; color: var(--accent, #EBC531);
       text-shadow: 0 3px 0 rgba(0,0,0,0.6), 0 8px 26px rgba(0,0,0,0.75), 0 0 28px rgba(235,197,49,0.30);
     }
     .visually-hidden {
@@ -112,8 +110,8 @@
     <div class="hero-bg"></div>
     <nav class="navbar">
       <a href="#" class="nav-logo" aria-label="Welisson Barber">
-        <img src="logo_emblema.png" alt="" class="nav-logo-img"/>
-        <span class="nav-logo-text"><strong>Welisson</strong><em>Barber</em></span>
+        <img src="logo_emblema.png" alt="" class="nav-logo-img" data-logo/>
+        <span class="nav-logo-text"><strong id="marca-nav-strong">Welisson</strong><em id="marca-nav-em">Barber</em></span>
       </a>
       <!-- Hamburger mobile -->
       <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
@@ -128,12 +126,12 @@
 
     <div class="hero-content">
       <h1 class="hero-title">
-        <img src="logo_emblema.png" alt="" class="hero-logo"/>
+        <img src="logo_emblema.png" alt="" class="hero-logo" data-logo/>
         <span class="hero-name" aria-hidden="true">
-          <span class="hero-name-top">Wellisson</span>
-          <span class="hero-name-bottom">Barber</span>
+          <span class="hero-name-top" id="marca-hero-top">Wellisson</span>
+          <span class="hero-name-bottom" id="marca-hero-bottom">Barber</span>
         </span>
-        <span class="visually-hidden">Welisson Barber</span>
+        <span class="visually-hidden" id="marca-visually-hidden">Welisson Barber</span>
       </h1>
       <p class="hero-sub"><span class="hero-sub-item">Barba</span><span class="hero-sub-dot">·</span><span class="hero-sub-item">Cabelo</span><span class="hero-sub-dot">·</span><span class="hero-sub-item">Estilo</span></p>
       <a href="#agendar" class="btn-hero">Agendar Horário</a>
@@ -325,6 +323,9 @@
   </footer>
 
   <script src="app.js"></script>
+  <script>
+    carregarConfigBarbearia();
+  </script>
   <script>
     // Menu hamburger
     const hamburger = document.getElementById('nav-hamburger');
