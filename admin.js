@@ -213,7 +213,13 @@ function linhaServicoHtml(s) {
   const key = escPlano(s.id);
   return '<div class="serv-linha" data-key="' + key + '" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
     '<span class="serv-handle" title="Arraste para reordenar" ' +
-      'style="cursor:grab;color:#5E6E9E;font-size:18px;line-height:1;padding:4px 2px;touch-action:none;user-select:none;flex-shrink:0;">⠿</span>' +
+      'style="cursor:grab;display:flex;align-items:center;justify-content:center;padding:4px;touch-action:none;user-select:none;flex-shrink:0;">' +
+      '<svg width="14" height="20" viewBox="0 0 14 20" fill="none" style="pointer-events:none;">' +
+        '<circle cx="4" cy="4" r="1.6" fill="#5E6E9E"/><circle cx="10" cy="4" r="1.6" fill="#5E6E9E"/>' +
+        '<circle cx="4" cy="10" r="1.6" fill="#5E6E9E"/><circle cx="10" cy="10" r="1.6" fill="#5E6E9E"/>' +
+        '<circle cx="4" cy="16" r="1.6" fill="#5E6E9E"/><circle cx="10" cy="16" r="1.6" fill="#5E6E9E"/>' +
+      '</svg>' +
+    '</span>' +
     '<input type="text" data-name="' + key + '" value="' + escPlano(s.name) + '" placeholder="Nome do serviço" ' +
       'style="flex:1;min-width:150px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Oswald\',sans-serif;font-size:13px;letter-spacing:.5px;outline:none;"/>' +
     '<div style="display:flex;align-items:center;gap:6px;">' +
