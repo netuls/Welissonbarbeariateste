@@ -102,7 +102,61 @@
       border: 1px solid #233F80 !important;
       color: #F1EAD6 !important;
     }
-    /* Botão salvar horários */
+    /* Botão salvar horários — estilo abaixo */
+    /* ── Correções de responsividade — Ajustes / Horários / Avulso (mobile) ── */
+    @media (max-width: 768px) {
+      .aj-grid-2, .aj-grid-3, .avulso-grid-3 {
+        grid-template-columns: 1fr !important;
+      }
+      #tab-ajustes, #tab-horarios, #tab-datas {
+        max-width: 100% !important;
+      }
+      #tab-ajustes > div, #tab-horarios > div, #tab-datas > div {
+        max-width: 100% !important;
+      }
+      /* Empilha rótulo, horários e prévia em cada linha de dia */
+      .horario-linha-principal, .horario-linha-almoco {
+        gap: 12px !important;
+      }
+      .horario-toggle-label, .horario-almoco-label {
+        min-width: 0 !important;
+        width: 100% !important;
+      }
+      .horario-times, .horario-almoco-times {
+        width: 100% !important;
+        justify-content: space-between !important;
+      }
+      .horario-preview {
+        margin-left: 0 !important;
+        width: 100% !important;
+      }
+      .horario-preview span {
+        word-break: break-word !important;
+      }
+      #horarios-grid input[type="time"] {
+        width: 100% !important;
+        max-width: 120px !important;
+        box-sizing: border-box !important;
+      }
+      /* Formulário de Data Especial */
+      #de-form-row, #de-horarios-wrap {
+        gap: 12px !important;
+      }
+      #de-form-row > div, #de-horarios-wrap > div {
+        width: 100% !important;
+      }
+      #de-data, #de-desc, #de-tipo, #de-inicio, #de-fim, #de-almoco-inicio, #de-almoco-fim {
+        width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      /* Evita zoom automático do iOS nos campos de texto */
+      #tab-ajustes input[type="text"],
+      #tab-ajustes input[type="tel"],
+      #tab-datas input[type="text"] {
+        font-size: 16px !important;
+      }
+    }
+
     #btn-salvar-horarios {
       background: #1B3168 !important;
       border: 1px solid #2C4E9E !important;
@@ -415,16 +469,16 @@
           <!-- Formulário para adicionar data -->
           <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;margin-bottom:28px;">
             <p style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;margin-bottom:18px;">Adicionar Data Especial</p>
-            <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
+            <div id="de-form-row" style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Data</span>
                 <input type="date" id="de-data"
                   style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;color-scheme:dark;"/>
               </div>
-              <div style="display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px;">
                 <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Descrição</span>
                 <input type="text" id="de-desc" placeholder="Ex: Natal, Aniversário da cidade..."
-                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;width:220px;font-family:'Roboto',sans-serif;"/>
+                  style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;width:100%;font-family:'Roboto',sans-serif;"/>
               </div>
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Tipo</span>
@@ -501,7 +555,7 @@
             <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Dados da Barbearia</h3>
             <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Nome, logo e WhatsApp. As mudanças aparecem no site e no painel assim que você salvar.</p>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+            <div class="aj-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Nome da Barbearia</span>
                 <input type="text" id="aj-nome" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;"/>
@@ -511,7 +565,7 @@
                 <input type="tel" id="aj-whatsapp" placeholder="5585999999999" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;"/>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
+            <div class="aj-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
               <div style="display:flex;flex-direction:column;gap:4px;">
                 <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Topo do site · linha 1</span>
                 <input type="text" id="aj-topo1" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
@@ -543,7 +597,7 @@
           <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
             <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Letra do Nome no Topo</h3>
             <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Escolha o estilo de letra do nome grande que aparece no início do site. Muda só a aparência: as palavras continuam sendo as de "Topo do site", em Dados da Barbearia.</p>
-            <div id="aj-letra-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px;"></div>
+            <div id="aj-letra-grid" class="aj-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px;"></div>
             <button onclick="salvarLetra()" id="btn-salvar-aj-letra" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Letra</button>
             <span id="aj-letra-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
           </div>
@@ -554,7 +608,7 @@
             <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Escolha as duas cores principais: destaque e fundo. O sistema ajusta todos os tons sozinho, no site e no painel.</p>
 
             <p style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;margin-bottom:10px;">Paletas prontas</p>
-            <div id="aj-cores-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;"></div>
+            <div id="aj-cores-grid" class="aj-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;"></div>
 
             <div style="display:block;width:100%;clear:both;position:static;margin-bottom:18px;">
               <button type="button" id="btn-cor-pela-logo" onclick="toggleCoresDaLogo()"
@@ -960,7 +1014,7 @@
         </div>
 
         <!-- Valor + Data + Hora em linha -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <div class="avulso-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
           <div>
             <label style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:3px;color:#5E6E9E;text-transform:uppercase;display:block;margin-bottom:8px;">Valor (R$)</label>
             <input type="number" id="avulso-preco" placeholder="0,00" step="0.01" min="0"
