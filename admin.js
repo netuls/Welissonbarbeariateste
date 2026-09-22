@@ -602,7 +602,7 @@ function extrairPaletaDeImagem(img, maxCores, modo) {
   return finais.map(c => rgbParaHex(c.r, c.g, c.b));
 }
 
-function atualizarCoresDaLogo() {
+function atualizarCoresDaLogo(aplicarAuto) {
   const img = document.getElementById('aj-logo-preview');
   if (!img) return;
 
@@ -625,7 +625,19 @@ function atualizarCoresDaLogo() {
       ? escuras.map(h => corLogoSwatchHtml(h, 'fundo')).join('')
       : '<span style="font-size:12px;color:#5E6E9E;">Nenhum tom escuro o bastante nesta logo.</span>';
 
-    marcarSwatchesLogoAtivos();
+    // Aplica automaticamente a melhor cor viva (destaque) e o melhor tom escuro (fundo)
+    // encontrados na logo, sem precisar que o usuário toque em nada.
+    if (aplicarAuto && (vivas.length || escuras.length)) {
+      if (!_ajCoresPendente) _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
+      if (vivas.length) _ajCoresPendente.destaque = vivas[0];
+      if (escuras.length) _ajCoresPendente.fundo = escuras[0];
+      _ajPaletaSelecionada = null;
+      renderCoresGrid(); // atualiza prévia, swatches ativos e grade de paletas
+      const aviso = document.getElementById('aj-cores-logo-auto-aviso');
+      if (aviso) aviso.style.display = 'block';
+    } else {
+      marcarSwatchesLogoAtivos();
+    }
   };
   if (img.complete && img.naturalWidth) rodar();
   else img.onload = rodar;
@@ -638,7 +650,7 @@ function toggleCoresDaLogo() {
   const abrindo = painel.style.display === 'none';
   painel.style.display = abrindo ? 'block' : 'none';
   if (texto) texto.textContent = abrindo ? 'Ocultar Cores da Logo' : 'Escolher Cor pela Logo';
-  if (abrindo) atualizarCoresDaLogo(); // garante que está com as cores da logo atual
+  if (abrindo) atualizarCoresDaLogo(true); // identifica e já aplica as cores automaticamente
 }
 
 function selecionarCorLogo(hex, tipo) {
