@@ -3257,21 +3257,30 @@ async function salvarAtendimentoAvulso() {
   statusEl.style.display = 'none';
 
   try {
-    const payload = {
-      cliente:     nome,
-      telefone:    tel || '',
-      servico:     svcName,
-      preco:       preco,
-      data:        data,
-      horario:     hora || '',
-      status:      'concluido',
-      origem:      'avulso',
-      obs:         obs,
-      criadoEm:    firebase.firestore.FieldValue.serverTimestamp(),
-      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    // 1) Cria o agendamento já "limpo", só com os campos que a regra do Firestore
+    //    libera no create (mesma regra usada pelo agendamento público) e status
+    //    "agendado" — é o único valor aceito na criação.
+    const payloadCriacao = {
+      cliente:  nome,
+      telefone: tel || '',
+      servico:  svcName,
+      preco:    preco,
+      data:     data,
+      horario:  hora || '',
+      obs:      obs,
+      status:   'agendado',
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
     };
 
-    await db.collection('agendamentos').add(payload);
+    const ref = await db.collection('agendamentos').add(payloadCriacao);
+
+    // 2) Como admin autenticado, o update é livre: aqui marcamos como concluído
+    //    (atendimento avulso já foi realizado) e guardamos a origem.
+    await ref.update({
+      status:       'concluido',
+      origem:       'avulso',
+      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    });
 
     // Atualiza histórico do cliente no Firestore (se tiver telefone)
     if (tel) {
