@@ -1268,15 +1268,15 @@ function renderHorariosGrid() {
         display:flex; flex-direction:column; gap:14px; transition:border .2s;">
 
       <!-- Linha principal: toggle + horários de atendimento -->
-      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:170px;" onclick="toggleDia('${dia.key}')">
+      <div class="horario-linha-principal" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+        <label class="horario-toggle-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:170px;" onclick="toggleDia('${dia.key}')">
           <div style="width:44px;height:24px;border-radius:12px;background:${on ? '#5E6E9E' : '#1B3168'};position:relative;transition:background .2s;flex-shrink:0;">
             <div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${on ? '23px' : '3px'};transition:left .2s;"></div>
           </div>
           <span style="font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:1px;color:${on ? '#F1EAD6' : '#5E6E9E'};transition:color .2s;">${dia.label}</span>
         </label>
 
-        <div style="display:flex;align-items:center;gap:12px;${on ? '' : 'opacity:.3;pointer-events:none;'}">
+        <div class="horario-times" style="display:flex;align-items:center;gap:12px;${on ? '' : 'opacity:.3;pointer-events:none;'}">
           <div style="display:flex;flex-direction:column;gap:3px;">
             <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Abertura</span>
             <input type="time" id="inicio-${dia.key}" value="${cfg.inicio}"
@@ -1292,22 +1292,22 @@ function renderHorariosGrid() {
           </div>
         </div>
 
-        <div style="margin-left:auto;${on ? '' : 'opacity:.3;'}">
+        <div class="horario-preview" style="margin-left:auto;${on ? '' : 'opacity:.3;'}">
           <span style="font-size:11px;color:#7183B4;font-family:'Oswald',sans-serif;letter-spacing:1px;">Horarios: </span>
           <span style="font-size:12px;color:#B4BEDC;font-family:'Roboto',sans-serif;" id="preview-${dia.key}">${previewSlots(cfg.inicio, cfg.fim, cfg.almoco, cfg.almoco_inicio, cfg.almoco_fim)}</span>
         </div>
       </div>
 
       <!-- Linha de almoço -->
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 14px;border-radius:5px;background:#0A1330;border:1px solid ${alOn ? '#233F80' : '#122452'};${on ? '' : 'opacity:.3;pointer-events:none;'}">
-        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;min-width:170px;" onclick="toggleAlmoco('${dia.key}')">
+      <div class="horario-linha-almoco" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 14px;border-radius:5px;background:#0A1330;border:1px solid ${alOn ? '#233F80' : '#122452'};${on ? '' : 'opacity:.3;pointer-events:none;'}">
+        <label class="horario-almoco-label" style="display:flex;align-items:center;gap:9px;cursor:pointer;min-width:170px;" onclick="toggleAlmoco('${dia.key}')">
           <div style="width:36px;height:20px;border-radius:10px;background:${alOn ? '#5E6E9E' : '#1B3168'};position:relative;transition:background .2s;flex-shrink:0;">
             <div style="width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${alOn ? '19px' : '3px'};transition:left .2s;"></div>
           </div>
           <span style="font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:${alOn ? '#F1EAD6' : '#5E6E9E'};transition:color .2s;">Intervalo de Almoço</span>
         </label>
 
-        <div style="display:flex;align-items:center;gap:10px;${alOn ? '' : 'opacity:.3;pointer-events:none;'}">
+        <div class="horario-almoco-times" style="display:flex;align-items:center;gap:10px;${alOn ? '' : 'opacity:.3;pointer-events:none;'}">
           <div style="display:flex;flex-direction:column;gap:3px;">
             <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Início pausa</span>
             <input type="time" id="almoco-inicio-${dia.key}" value="${cfg.almoco_inicio || '12:00'}"
