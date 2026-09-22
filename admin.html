@@ -381,9 +381,15 @@
         <div style="max-width:720px;">
           <div style="margin-bottom:24px;">
             <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Valores dos Serviços</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Altere o preço e a duração de cada serviço. Ao salvar, os novos valores passam a valer no site para os próximos agendamentos e no atendimento avulso do painel. Agendamentos que já existem mantêm os valores de quando foram feitos.</p>
+            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Adicione, edite ou remova serviços. Ao salvar, os valores passam a valer no site para os próximos agendamentos e no atendimento avulso do painel. Agendamentos que já existem mantêm os valores de quando foram feitos.</p>
           </div>
-          <div id="servicos-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;"></div>
+          <div id="servicos-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+          <div style="margin-bottom:24px;">
+            <button onclick="adicionarServicoNovo()"
+              style="background:transparent;border:1px dashed #2C4E9E;color:#94A4CC;padding:12px 20px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;width:100%;">
+              + Adicionar Serviço
+            </button>
+          </div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <button onclick="salvarServicos()" id="btn-salvar-servicos"
               style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 36px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">
