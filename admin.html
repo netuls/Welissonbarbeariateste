@@ -556,11 +556,13 @@
             <p style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;margin-bottom:10px;">Paletas prontas</p>
             <div id="aj-cores-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;"></div>
 
-            <button type="button" id="btn-cor-pela-logo" onclick="toggleCoresDaLogo()"
-              style="background:transparent;border:1px dashed #2C4E9E;color:#B4BEDC;padding:12px 18px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;width:100%;margin-bottom:18px;display:flex;align-items:center;justify-content:center;gap:8px;">
-              <img id="btn-cor-pela-logo-mini" src="" style="width:18px;height:18px;object-fit:contain;border-radius:3px;"/>
-              <span id="btn-cor-pela-logo-texto">Escolher Cor pela Logo</span>
-            </button>
+            <div style="display:block;width:100%;clear:both;position:static;margin-bottom:18px;">
+              <button type="button" id="btn-cor-pela-logo" onclick="toggleCoresDaLogo()"
+                style="box-sizing:border-box !important;position:static !important;float:none !important;transform:none !important;top:auto !important;left:auto !important;background:transparent;border:1px dashed #2C4E9E;color:#B4BEDC;padding:12px 18px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;width:100% !important;display:flex !important;align-items:center;justify-content:center;gap:8px;margin:0 !important;">
+                <img id="btn-cor-pela-logo-mini" src="" style="width:18px;height:18px;object-fit:contain;border-radius:3px;"/>
+                <span id="btn-cor-pela-logo-texto">Escolher Cor pela Logo</span>
+              </button>
+            </div>
 
             <div id="aj-cores-logo-painel" style="display:none;margin-bottom:8px;padding:16px;background:#0A1330;border:1px solid #16295C;border-radius:6px;">
               <p style="font-size:12px;color:#5E6E9E;line-height:1.6;margin-bottom:14px;">O sistema identifica automaticamente as cores da logo que está em uso. Toque numa cor para usá-la como destaque ou como fundo do site.</p>
