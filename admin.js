@@ -212,6 +212,8 @@ async function carregarPrecosServicos() {
 function linhaServicoHtml(s) {
   const key = escPlano(s.id);
   return '<div class="serv-linha" data-key="' + key + '" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
+    '<span class="serv-handle" title="Arraste para reordenar" ' +
+      'style="cursor:grab;color:#5E6E9E;font-size:18px;line-height:1;padding:4px 2px;touch-action:none;user-select:none;flex-shrink:0;">⠿</span>' +
     '<input type="text" data-name="' + key + '" value="' + escPlano(s.name) + '" placeholder="Nome do serviço" ' +
       'style="flex:1;min-width:150px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Oswald\',sans-serif;font-size:13px;letter-spacing:.5px;outline:none;"/>' +
     '<div style="display:flex;align-items:center;gap:6px;">' +
@@ -234,6 +236,7 @@ function renderServicosEditor() {
   if (!el) return;
   el.innerHTML = SERVICES.map(linhaServicoHtml).join('');
   document.getElementById('servicos-status').textContent = '';
+  ativarArrastarServicos();
 }
 
 function adicionarServicoNovo() {
@@ -246,6 +249,86 @@ function adicionarServicoNovo() {
   const nomeInput = ultima.querySelector('input[data-name]');
   if (nomeInput) nomeInput.focus();
   ultima.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  ativarArrastarServicos();
+}
+
+// ── Arrastar para reordenar os serviços ──
+function ativarArrastarServicos() {
+  const lista = document.getElementById('servicos-lista');
+  if (!lista) return;
+  lista.querySelectorAll('.serv-handle').forEach(handle => {
+    handle.onpointerdown = iniciarArrasteServico;
+  });
+}
+
+let _arrasteServico = null;
+
+function iniciarArrasteServico(ev) {
+  const linha = ev.currentTarget.closest('.serv-linha');
+  const lista = document.getElementById('servicos-lista');
+  if (!linha || !lista) return;
+  ev.preventDefault();
+
+  const rect = linha.getBoundingClientRect();
+  const placeholder = document.createElement('div');
+  placeholder.className = 'serv-placeholder';
+  placeholder.style.cssText = 'height:' + rect.height + 'px;border:1.5px dashed #2C4E9E;border-radius:6px;background:rgba(44,78,158,0.10);flex-shrink:0;';
+
+  _arrasteServico = { linha, lista, offsetY: ev.clientY - rect.top, placeholder };
+
+  linha.style.position = 'fixed';
+  linha.style.zIndex = '999';
+  linha.style.width = rect.width + 'px';
+  linha.style.left = rect.left + 'px';
+  linha.style.top = rect.top + 'px';
+  linha.style.pointerEvents = 'none';
+  linha.style.boxShadow = '0 12px 26px rgba(0,0,0,0.45)';
+  linha.querySelector('.serv-handle').style.cursor = 'grabbing';
+
+  linha.parentNode.insertBefore(placeholder, linha.nextSibling);
+
+  document.addEventListener('pointermove', moverArrasteServico);
+  document.addEventListener('pointerup', soltarArrasteServico, { once: true });
+}
+
+function moverArrasteServico(ev) {
+  if (!_arrasteServico) return;
+  const { linha, lista, offsetY, placeholder } = _arrasteServico;
+  linha.style.top = (ev.clientY - offsetY) + 'px';
+
+  const irmaos = Array.from(lista.querySelectorAll('.serv-linha')).filter(el => el !== linha);
+  let alvo = null;
+  for (const el of irmaos) {
+    const r = el.getBoundingClientRect();
+    if (ev.clientY < r.top + r.height / 2) { alvo = el; break; }
+  }
+  if (alvo) lista.insertBefore(placeholder, alvo);
+  else lista.appendChild(placeholder);
+
+  // Auto-scroll quando arrasta perto do topo/rodapé da tela
+  const margem = 60;
+  if (ev.clientY < margem) window.scrollBy(0, -12);
+  else if (ev.clientY > window.innerHeight - margem) window.scrollBy(0, 12);
+}
+
+function soltarArrasteServico() {
+  if (!_arrasteServico) return;
+  const { linha, placeholder } = _arrasteServico;
+  placeholder.parentNode.insertBefore(linha, placeholder);
+  placeholder.remove();
+  linha.style.position = '';
+  linha.style.zIndex = '';
+  linha.style.width = '';
+  linha.style.left = '';
+  linha.style.top = '';
+  linha.style.pointerEvents = '';
+  linha.style.boxShadow = '';
+  const handle = linha.querySelector('.serv-handle');
+  if (handle) handle.style.cursor = 'grab';
+  document.removeEventListener('pointermove', moverArrasteServico);
+  _arrasteServico = null;
+  const st = document.getElementById('servicos-status');
+  if (st) { st.style.color = '#94A4CC'; st.textContent = 'Ordem alterada. Clique em Salvar Valores para aplicar no site.'; }
 }
 
 function removerServicoLinha(btn) {
@@ -324,7 +407,9 @@ function renderAjustesForm() {
   document.getElementById('aj-nomecurto').value = BARBEARIA.nomeCurto || '';
   document.getElementById('aj-logo-preview').src = BARBEARIA.logoBase64 || BARBEARIA.logo;
   renderLetraGrid();
+  _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
   renderCoresGrid();
+  atualizarCoresDaLogo();
 }
 
 let _ajLogoBase64Selecionada = undefined; // undefined = não mexeu; null = voltar ao padrão; string = nova logo
@@ -347,6 +432,7 @@ function ajLogoSelecionada(ev) {
       const dataUrl = canvas.toDataURL('image/png');
       _ajLogoBase64Selecionada = dataUrl;
       document.getElementById('aj-logo-preview').src = dataUrl;
+      atualizarCoresDaLogo();
     };
     img.src = e.target.result;
   };
@@ -356,6 +442,7 @@ function ajLogoSelecionada(ev) {
 function ajUsarLogoPadrao() {
   _ajLogoBase64Selecionada = null;
   document.getElementById('aj-logo-preview').src = BARBEARIA_PADRAO.logo;
+  atualizarCoresDaLogo();
 }
 
 async function salvarDadosBarbearia() {
@@ -427,36 +514,153 @@ async function salvarLetra() {
 }
 
 let _ajPaletaSelecionada = null;
+let _ajCoresPendente = null; // { destaque, fundo } — seleção ainda não salva
+
 function renderCoresGrid() {
   const el = document.getElementById('aj-cores-grid');
   if (!el) return;
+  if (!_ajCoresPendente) _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
+
   el.innerHTML = PALETAS_CORES.map(p => {
-    const ativo = BARBEARIA.corDestaque === p.destaque && BARBEARIA.corFundo === p.fundo;
+    const ativo = _ajCoresPendente.destaque === p.destaque && _ajCoresPendente.fundo === p.fundo;
     return '<div data-paleta="' + p.id + '" onclick="selecionarPaleta(\'' + p.id + '\')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:6px;background:#0A1330;border:1.5px solid ' + (ativo ? '#EBC531' : '#16295C') + ';">' +
       '<span style="width:16px;height:16px;border-radius:50%;background:' + p.fundo + ';border:1px solid #233F80;flex-shrink:0;"></span>' +
       '<span style="width:16px;height:16px;border-radius:50%;background:' + p.destaque + ';flex-shrink:0;"></span>' +
       '<span style="font-family:\'Oswald\',sans-serif;font-size:11px;letter-spacing:1px;color:#B4BEDC;text-transform:uppercase;">' + p.label + '</span>' +
     '</div>';
   }).join('');
+
+  marcarSwatchesLogoAtivos();
+  atualizarPreviewCores();
 }
 
 function selecionarPaleta(id) {
   _ajPaletaSelecionada = id;
-  document.querySelectorAll('#aj-cores-grid [data-paleta]').forEach(d => {
-    d.style.borderColor = d.dataset.paleta === id ? '#EBC531' : '#16295C';
+  const p = PALETAS_CORES.find(x => x.id === id);
+  if (p) _ajCoresPendente = { destaque: p.destaque, fundo: p.fundo };
+  renderCoresGrid();
+}
+
+// ── Cores extraídas da logo ──
+function corLogoSwatchHtml(hex, tipo) {
+  return '<div data-corlogo="' + hex + '" data-tipo="' + tipo + '" onclick="selecionarCorLogo(\'' + hex + '\',\'' + tipo + '\')" ' +
+    'title="' + hex.toUpperCase() + '" ' +
+    'style="cursor:pointer;width:36px;height:36px;border-radius:8px;background:' + hex + ';border:2px solid #16295C;flex-shrink:0;"></div>';
+}
+
+function extrairPaletaDeImagem(img, maxCores, modo) {
+  if (!img || !img.naturalWidth) return [];
+  const tam = 48;
+  const canvas = document.createElement('canvas');
+  canvas.width = tam; canvas.height = tam;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const escala = Math.min(tam / img.naturalWidth, tam / img.naturalHeight);
+  const w = Math.max(1, img.naturalWidth * escala);
+  const h = Math.max(1, img.naturalHeight * escala);
+  ctx.clearRect(0, 0, tam, tam);
+  ctx.drawImage(img, (tam - w) / 2, (tam - h) / 2, w, h);
+
+  let dados;
+  try { dados = ctx.getImageData(0, 0, tam, tam).data; } catch (e) { return []; }
+
+  const contagem = new Map();
+  const quant = v => Math.round(v / 20) * 20;
+  for (let i = 0; i < dados.length; i += 4) {
+    const r = dados[i], g = dados[i + 1], b = dados[i + 2], a = dados[i + 3];
+    if (a < 128) continue; // pixel transparente
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lum = (r + g + b) / 3;
+    if (lum > 246) continue; // quase branco
+    if (modo === 'viva') {
+      if (sat < 0.18 || lum < 35 || lum > 225) continue;
+    } else {
+      if (lum > 95 || lum < 6) continue; // tons escuros p/ fundo, evita preto absoluto
+    }
+    const key = quant(r) + ',' + quant(g) + ',' + quant(b);
+    const atual = contagem.get(key) || { r: 0, g: 0, b: 0, n: 0 };
+    atual.r += r; atual.g += g; atual.b += b; atual.n += 1;
+    contagem.set(key, atual);
+  }
+
+  const cores = Array.from(contagem.values())
+    .map(c => ({ r: Math.round(c.r / c.n), g: Math.round(c.g / c.n), b: Math.round(c.b / c.n), n: c.n }))
+    .sort((a, b) => b.n - a.n);
+
+  const finais = [];
+  for (const c of cores) {
+    const longe = !finais.some(f => Math.hypot(f.r - c.r, f.g - c.g, f.b - c.b) < 36);
+    if (longe) finais.push(c);
+    if (finais.length >= maxCores) break;
+  }
+  return finais.map(c => rgbParaHex(c.r, c.g, c.b));
+}
+
+function atualizarCoresDaLogo() {
+  const img = document.getElementById('aj-logo-preview');
+  if (!img) return;
+  const rodar = () => {
+    let vivas = [], escuras = [];
+    try {
+      vivas = extrairPaletaDeImagem(img, 6, 'viva');
+      escuras = extrairPaletaDeImagem(img, 6, 'escura');
+    } catch (e) { console.warn('Não foi possível ler as cores da logo.', e); }
+
+    const elD = document.getElementById('aj-cores-logo-destaque');
+    const elF = document.getElementById('aj-cores-logo-fundo');
+    if (elD) elD.innerHTML = vivas.length
+      ? vivas.map(h => corLogoSwatchHtml(h, 'destaque')).join('')
+      : '<span style="font-size:12px;color:#5E6E9E;">Nenhuma cor viva o bastante nesta logo.</span>';
+    if (elF) elF.innerHTML = escuras.length
+      ? escuras.map(h => corLogoSwatchHtml(h, 'fundo')).join('')
+      : '<span style="font-size:12px;color:#5E6E9E;">Nenhum tom escuro o bastante nesta logo.</span>';
+
+    marcarSwatchesLogoAtivos();
+  };
+  if (img.complete && img.naturalWidth) rodar();
+  else img.onload = rodar;
+}
+
+function selecionarCorLogo(hex, tipo) {
+  if (!_ajCoresPendente) _ajCoresPendente = { destaque: BARBEARIA.corDestaque, fundo: BARBEARIA.corFundo };
+  _ajCoresPendente[tipo] = hex;
+  _ajPaletaSelecionada = null; // a combinação deixou de ser exatamente uma paleta pronta
+  renderCoresGrid();
+}
+
+function marcarSwatchesLogoAtivos() {
+  document.querySelectorAll('[data-corlogo]').forEach(el => {
+    const tipo = el.dataset.tipo;
+    const cor = el.dataset.corlogo;
+    const ativo = !!(_ajCoresPendente && _ajCoresPendente[tipo] &&
+      _ajCoresPendente[tipo].toLowerCase() === cor.toLowerCase());
+    el.style.borderColor = ativo ? '#EBC531' : '#16295C';
+    el.style.boxShadow = ativo ? '0 0 0 2px rgba(235,197,49,0.35)' : 'none';
   });
+}
+
+function atualizarPreviewCores() {
+  if (!_ajCoresPendente) return;
+  const fundoEl = document.getElementById('aj-preview-fundo');
+  const destaqueEl = document.getElementById('aj-preview-destaque');
+  const hexEl = document.getElementById('aj-preview-hex');
+  if (fundoEl) fundoEl.style.background = _ajCoresPendente.fundo;
+  if (destaqueEl) destaqueEl.style.background = _ajCoresPendente.destaque;
+  if (hexEl) hexEl.textContent = _ajCoresPendente.destaque.toUpperCase() + '  ·  ' + _ajCoresPendente.fundo.toUpperCase();
 }
 
 async function salvarCores() {
   const st = document.getElementById('aj-cores-status');
   const btn = document.getElementById('btn-salvar-aj-cores');
-  const paleta = PALETAS_CORES.find(p => p.id === _ajPaletaSelecionada);
-  if (!paleta) { st.style.color = '#e05555'; st.textContent = 'Escolha uma paleta de cores.'; return; }
+  if (!_ajCoresPendente || !_ajCoresPendente.destaque || !_ajCoresPendente.fundo) {
+    st.style.color = '#e05555'; st.textContent = 'Escolha uma cor de destaque e uma de fundo.'; return;
+  }
+  const { destaque, fundo } = _ajCoresPendente;
   btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
   try {
-    await db.collection('config').doc('barbearia').set({ corDestaque: paleta.destaque, corFundo: paleta.fundo }, { merge: true });
-    BARBEARIA.corDestaque = paleta.destaque;
-    BARBEARIA.corFundo = paleta.fundo;
+    await db.collection('config').doc('barbearia').set({ corDestaque: destaque, corFundo: fundo }, { merge: true });
+    BARBEARIA.corDestaque = destaque;
+    BARBEARIA.corFundo = fundo;
     try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
     aplicarTema(BARBEARIA);
     renderCoresGrid();
