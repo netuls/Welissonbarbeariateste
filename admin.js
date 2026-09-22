@@ -162,101 +162,148 @@ function initAdmin() {
 // ── Valores dos serviços ─────────────────────────
 // Guardados em config/servicos (o site lê o mesmo documento):
 //   precos: { corte: 30, barba: 20, ... }   lista: [{ id, name, price }]
+const SERVICES_ORIGINAIS = SERVICES.map(s => Object.assign({}, s));
 const PRECOS_PADRAO = {};
 const DURACOES_PADRAO = {};
 SERVICES.forEach(s => { PRECOS_PADRAO[s.id] = s.price; DURACOES_PADRAO[s.id] = s.duracao; });
 
 function fmtPrecoServ(v) { return 'R$' + Number(v).toFixed(2).replace('.', ','); }
 
+function slugServico(nome) {
+  let base = String(nome || 'servico').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'servico';
+  let id = base, n = 2;
+  while (SERVICES.some(s => s.id === id)) { id = base + '_' + n; n++; }
+  return id;
+}
+
 async function carregarPrecosServicos() {
   try {
     const doc = await db.collection('config').doc('servicos').get();
     if (doc.exists) {
       const dados = doc.data() || {};
-      const precos = dados.precos || {};
-      const duracoes = dados.duracoes || {};
-      SERVICES.forEach(s => {
-        const v = Number(precos[s.id]);
-        if (precos[s.id] != null && !isNaN(v) && v >= 0) s.price = v;
-        const d = Number(duracoes[s.id]);
-        if (duracoes[s.id] != null && !isNaN(d) && d > 0) s.duracao = d;
-      });
+      if (Array.isArray(dados.lista) && dados.lista.length) {
+        // A lista salva é a fonte da verdade: reflete serviços adicionados/removidos no painel.
+        SERVICES.length = 0;
+        dados.lista.forEach(item => {
+          if (!item || !item.id || !item.name) return;
+          SERVICES.push({
+            id: item.id, name: item.name,
+            price: Number(item.price) >= 0 ? Number(item.price) : 0,
+            duracao: Number(item.duracao) > 0 ? Number(item.duracao) : 30,
+          });
+        });
+      } else {
+        const precos = dados.precos || {};
+        const duracoes = dados.duracoes || {};
+        SERVICES.forEach(s => {
+          const v = Number(precos[s.id]);
+          if (precos[s.id] != null && !isNaN(v) && v >= 0) s.price = v;
+          const d = Number(duracoes[s.id]);
+          if (duracoes[s.id] != null && !isNaN(d) && d > 0) s.duracao = d;
+        });
+      }
     }
   } catch (e) { console.warn('Não foi possível carregar os preços dos serviços', e); }
   if (document.getElementById('tab-servicos') && document.getElementById('tab-servicos').classList.contains('active')) renderServicosEditor();
 }
 
+function linhaServicoHtml(s) {
+  const key = escPlano(s.id);
+  return '<div class="serv-linha" data-key="' + key + '" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
+    '<input type="text" data-name="' + key + '" value="' + escPlano(s.name) + '" placeholder="Nome do serviço" ' +
+      'style="flex:1;min-width:150px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Oswald\',sans-serif;font-size:13px;letter-spacing:.5px;outline:none;"/>' +
+    '<div style="display:flex;align-items:center;gap:6px;">' +
+      '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">R$</span>' +
+      '<input type="number" min="0" step="0.5" data-serv="' + key + '" value="' + s.price.toFixed(2) + '" ' +
+        'style="width:90px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;gap:6px;">' +
+      '<input type="number" min="5" step="5" data-dur="' + key + '" value="' + s.duracao + '" ' +
+        'style="width:70px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+      '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">min</span>' +
+    '</div>' +
+    '<button type="button" onclick="removerServicoLinha(this)" title="Remover serviço" ' +
+      'style="background:transparent;border:1px solid #3a1f26;color:#c96666;width:34px;height:34px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;">×</button>' +
+  '</div>';
+}
+
 function renderServicosEditor() {
   const el = document.getElementById('servicos-lista');
   if (!el) return;
-  el.innerHTML = SERVICES.map(s => {
-    const mudouPreco = Math.abs(s.price - PRECOS_PADRAO[s.id]) > 0.004;
-    const mudouDur = s.duracao !== DURACOES_PADRAO[s.id];
-    return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
-      '<div style="flex:1;min-width:160px;">' +
-        '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;letter-spacing:.5px;color:#F1EAD6;">' + escPlano(s.name) + '</div>' +
-        '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#5E6E9E;">Padrão: ' + fmtPrecoServ(PRECOS_PADRAO[s.id]) + ' · ' + DURACOES_PADRAO[s.id] + ' min' + ((mudouPreco || mudouDur) ? ' · <span style="color:#EBC531;">alterado</span>' : '') + '</div>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:6px;">' +
-        '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">R$</span>' +
-        '<input type="number" min="0" step="0.5" data-serv="' + escPlano(s.id) + '" value="' + s.price.toFixed(2) + '" ' +
-          'style="width:90px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:6px;">' +
-        '<input type="number" min="5" step="5" data-dur="' + escPlano(s.id) + '" value="' + s.duracao + '" ' +
-          'style="width:70px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
-        '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">min</span>' +
-      '</div></div>';
-  }).join('');
+  el.innerHTML = SERVICES.map(linhaServicoHtml).join('');
   document.getElementById('servicos-status').textContent = '';
 }
 
+function adicionarServicoNovo() {
+  const el = document.getElementById('servicos-lista');
+  if (!el) return;
+  const novo = { id: '__novo_' + Date.now(), name: '', price: 0, duracao: 30 };
+  el.insertAdjacentHTML('beforeend', linhaServicoHtml(novo));
+  const linhas = el.querySelectorAll('.serv-linha');
+  const ultima = linhas[linhas.length - 1];
+  const nomeInput = ultima.querySelector('input[data-name]');
+  if (nomeInput) nomeInput.focus();
+  ultima.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removerServicoLinha(btn) {
+  const linha = btn.closest('.serv-linha');
+  if (linha) linha.remove();
+}
+
 function restaurarPrecosPadrao() {
-  document.querySelectorAll('#servicos-lista input[data-serv]').forEach(inp => {
-    inp.value = Number(PRECOS_PADRAO[inp.dataset.serv]).toFixed(2);
-  });
-  document.querySelectorAll('#servicos-lista input[data-dur]').forEach(inp => {
-    inp.value = DURACOES_PADRAO[inp.dataset.dur];
-  });
+  SERVICES.length = 0;
+  SERVICES_ORIGINAIS.forEach(s => SERVICES.push(Object.assign({}, s)));
+  renderServicosEditor();
   const st = document.getElementById('servicos-status');
   st.style.color = '#94A4CC';
-  st.textContent = 'Valores padrão preenchidos. Clique em Salvar para aplicar.';
+  st.textContent = 'Lista e valores padrão restaurados. Clique em Salvar para aplicar.';
 }
 
 async function salvarServicos() {
   const st = document.getElementById('servicos-status');
   const btn = document.getElementById('btn-salvar-servicos');
+  const linhas = document.querySelectorAll('#servicos-lista .serv-linha');
+  const novaLista = [];
   const novosPrecos = {};
   const novasDuracoes = {};
   let invalido = false;
-  document.querySelectorAll('#servicos-lista input[data-serv]').forEach(inp => {
-    const v = Number(String(inp.value).replace(',', '.'));
-    if (inp.value === '' || isNaN(v) || v < 0) { invalido = true; inp.style.borderColor = '#e05555'; }
-    else { inp.style.borderColor = '#233F80'; novosPrecos[inp.dataset.serv] = Math.round(v * 100) / 100; }
+
+  linhas.forEach(linha => {
+    const nomeInp = linha.querySelector('input[data-name]');
+    const precoInp = linha.querySelector('input[data-serv]');
+    const durInp = linha.querySelector('input[data-dur]');
+    const nome = (nomeInp.value || '').trim();
+    const preco = Number(String(precoInp.value).replace(',', '.'));
+    const dur = Number(durInp.value);
+
+    [nomeInp, precoInp, durInp].forEach(i => i.style.borderColor = '#233F80');
+    if (!nome) { invalido = true; nomeInp.style.borderColor = '#e05555'; }
+    if (precoInp.value === '' || isNaN(preco) || preco < 0) { invalido = true; precoInp.style.borderColor = '#e05555'; }
+    if (durInp.value === '' || isNaN(dur) || dur <= 0) { invalido = true; durInp.style.borderColor = '#e05555'; }
+    if (invalido) return;
+
+    let id = linha.dataset.key;
+    if (!id || id.indexOf('__novo_') === 0) id = slugServico(nome);
+    novaLista.push({ id, name: nome, price: Math.round(preco * 100) / 100, duracao: Math.round(dur) });
   });
-  document.querySelectorAll('#servicos-lista input[data-dur]').forEach(inp => {
-    const v = Number(inp.value);
-    if (inp.value === '' || isNaN(v) || v <= 0) { invalido = true; inp.style.borderColor = '#e05555'; }
-    else { inp.style.borderColor = '#233F80'; novasDuracoes[inp.dataset.dur] = Math.round(v); }
-  });
-  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Há valores inválidos. Confira preços e durações.'; return; }
+
+  if (!novaLista.length) invalido = true;
+  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Confira os campos destacados: nome, preço e duração são obrigatórios.'; return; }
+
+  novaLista.forEach(s => { novosPrecos[s.id] = s.price; novasDuracoes[s.id] = s.duracao; });
   btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
   try {
-    const lista = SERVICES.map(s => ({
-      id: s.id, name: s.name,
-      price: novosPrecos[s.id] != null ? novosPrecos[s.id] : s.price,
-      duracao: novasDuracoes[s.id] != null ? novasDuracoes[s.id] : s.duracao,
-    }));
     await db.collection('config').doc('servicos').set({
       precos: novosPrecos,
       duracoes: novasDuracoes,
-      lista,
+      lista: novaLista,
       atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    SERVICES.forEach(s => {
-      if (novosPrecos[s.id] != null) s.price = novosPrecos[s.id];
-      if (novasDuracoes[s.id] != null) s.duracao = novasDuracoes[s.id];
-    });
+    SERVICES.length = 0;
+    novaLista.forEach(s => SERVICES.push(Object.assign({}, s)));
     renderServicosEditor();
     st.style.color = '#4caf50'; st.textContent = 'Valores salvos! Já valem para novos agendamentos.';
     showToast('Valores dos serviços atualizados.');
