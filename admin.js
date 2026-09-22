@@ -1,13 +1,6 @@
 // ── Firebase ─────────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyA7oHFbbLaMi5Ptwic0o4cqvuZN1jD039M",
-  authDomain: "welisson-77143.firebaseapp.com",
-  projectId: "welisson-77143",
-  storageBucket: "welisson-77143.firebasestorage.app",
-  messagingSenderId: "120956065574",
-  appId: "1:120956065574:web:40ce021fa58845c19093e7"
-};
-firebase.initializeApp(firebaseConfig);
+// FIREBASE_CONFIG vem do config.js (compartilhado com o site).
+firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore();
 
 // ── Push Notifications (FCM) ─────────────────────
@@ -64,15 +57,15 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
 
 const SERVICES = [
-  { id: 'corte',             name: 'Corte',                        price: 30 },
-  { id: 'barba',             name: 'Barba',                        price: 20 },
-  { id: 'sobrancelha',       name: 'Sobrancelha',                  price: 10 },
-  { id: 'corte_barba',       name: 'Corte + Barba',                price: 45 },
-  { id: 'corte_barba_sob',   name: 'Corte + Barba + Sobrancelha', price: 50 },
-  { id: 'luzes',             name: 'Luzes',                        price: 60 },
-  { id: 'luzes_corte',       name: 'Luzes + Corte',                price: 80 },
-  { id: 'platinado',         name: 'Platinado',                    price: 80 },
-  { id: 'platinado_corte',   name: 'Platinado + Corte',            price: 110 }
+  { id: 'corte',             name: 'Corte',                        price: 30,  duracao: 30 },
+  { id: 'barba',             name: 'Barba',                        price: 20,  duracao: 30 },
+  { id: 'sobrancelha',       name: 'Sobrancelha',                  price: 10,  duracao: 30 },
+  { id: 'corte_barba',       name: 'Corte + Barba',                price: 45,  duracao: 40 },
+  { id: 'corte_barba_sob',   name: 'Corte + Barba + Sobrancelha', price: 50,  duracao: 45 },
+  { id: 'luzes',             name: 'Luzes',                        price: 60,  duracao: 60 },
+  { id: 'luzes_corte',       name: 'Luzes + Corte',                price: 80,  duracao: 60 },
+  { id: 'platinado',         name: 'Platinado',                    price: 80,  duracao: 60 },
+  { id: 'platinado_corte',   name: 'Platinado + Corte',            price: 110, duracao: 60 }
 ];
 
 const PLANS = [
@@ -153,6 +146,10 @@ function initAdmin() {
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   loadAgendamentos();
   carregarPrecosServicos();
+  carregarConfigBarbearia().then(() => {
+    const tabAj = document.getElementById('tab-ajustes');
+    if (tabAj && tabAj.classList.contains('active')) renderAjustesForm();
+  });
   verificarAniversariosGlobal();
   verificarPlanosGlobal();
   carregarClientesFirestore().then(() => { try { renderDashboard(); } catch (e) {} });
@@ -166,7 +163,8 @@ function initAdmin() {
 // Guardados em config/servicos (o site lê o mesmo documento):
 //   precos: { corte: 30, barba: 20, ... }   lista: [{ id, name, price }]
 const PRECOS_PADRAO = {};
-SERVICES.forEach(s => { PRECOS_PADRAO[s.id] = s.price; });
+const DURACOES_PADRAO = {};
+SERVICES.forEach(s => { PRECOS_PADRAO[s.id] = s.price; DURACOES_PADRAO[s.id] = s.duracao; });
 
 function fmtPrecoServ(v) { return 'R$' + Number(v).toFixed(2).replace('.', ','); }
 
@@ -174,10 +172,14 @@ async function carregarPrecosServicos() {
   try {
     const doc = await db.collection('config').doc('servicos').get();
     if (doc.exists) {
-      const precos = (doc.data() || {}).precos || {};
+      const dados = doc.data() || {};
+      const precos = dados.precos || {};
+      const duracoes = dados.duracoes || {};
       SERVICES.forEach(s => {
         const v = Number(precos[s.id]);
         if (precos[s.id] != null && !isNaN(v) && v >= 0) s.price = v;
+        const d = Number(duracoes[s.id]);
+        if (duracoes[s.id] != null && !isNaN(d) && d > 0) s.duracao = d;
       });
     }
   } catch (e) { console.warn('Não foi possível carregar os preços dos serviços', e); }
@@ -188,16 +190,22 @@ function renderServicosEditor() {
   const el = document.getElementById('servicos-lista');
   if (!el) return;
   el.innerHTML = SERVICES.map(s => {
-    const mudou = Math.abs(s.price - PRECOS_PADRAO[s.id]) > 0.004;
+    const mudouPreco = Math.abs(s.price - PRECOS_PADRAO[s.id]) > 0.004;
+    const mudouDur = s.duracao !== DURACOES_PADRAO[s.id];
     return '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#0C1838;border:1px solid #122452;border-radius:6px;padding:12px 16px;">' +
       '<div style="flex:1;min-width:160px;">' +
         '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;letter-spacing:.5px;color:#F1EAD6;">' + escPlano(s.name) + '</div>' +
-        '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#5E6E9E;">Valor padrão: ' + fmtPrecoServ(PRECOS_PADRAO[s.id]) + (mudou ? ' · <span style="color:#EBC531;">alterado</span>' : '') + '</div>' +
+        '<div style="font-family:\'Roboto\',sans-serif;font-size:11px;color:#5E6E9E;">Padrão: ' + fmtPrecoServ(PRECOS_PADRAO[s.id]) + ' · ' + DURACOES_PADRAO[s.id] + ' min' + ((mudouPreco || mudouDur) ? ' · <span style="color:#EBC531;">alterado</span>' : '') + '</div>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:6px;">' +
         '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">R$</span>' +
         '<input type="number" min="0" step="0.5" data-serv="' + escPlano(s.id) + '" value="' + s.price.toFixed(2) + '" ' +
-          'style="width:100px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+          'style="width:90px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<input type="number" min="5" step="5" data-dur="' + escPlano(s.id) + '" value="' + s.duracao + '" ' +
+          'style="width:70px;background:#0F1F45;border:1px solid #233F80;border-radius:6px;padding:9px 10px;color:#F1EAD6;font-family:\'Roboto\',sans-serif;font-size:15px;outline:none;"/>' +
+        '<span style="font-family:\'Roboto\',sans-serif;font-size:13px;color:#7183B4;">min</span>' +
       '</div></div>';
   }).join('');
   document.getElementById('servicos-status').textContent = '';
@@ -207,6 +215,9 @@ function restaurarPrecosPadrao() {
   document.querySelectorAll('#servicos-lista input[data-serv]').forEach(inp => {
     inp.value = Number(PRECOS_PADRAO[inp.dataset.serv]).toFixed(2);
   });
+  document.querySelectorAll('#servicos-lista input[data-dur]').forEach(inp => {
+    inp.value = DURACOES_PADRAO[inp.dataset.dur];
+  });
   const st = document.getElementById('servicos-status');
   st.style.color = '#94A4CC';
   st.textContent = 'Valores padrão preenchidos. Clique em Salvar para aplicar.';
@@ -215,26 +226,195 @@ function restaurarPrecosPadrao() {
 async function salvarServicos() {
   const st = document.getElementById('servicos-status');
   const btn = document.getElementById('btn-salvar-servicos');
-  const novos = {};
+  const novosPrecos = {};
+  const novasDuracoes = {};
   let invalido = false;
   document.querySelectorAll('#servicos-lista input[data-serv]').forEach(inp => {
     const v = Number(String(inp.value).replace(',', '.'));
     if (inp.value === '' || isNaN(v) || v < 0) { invalido = true; inp.style.borderColor = '#e05555'; }
-    else { inp.style.borderColor = '#233F80'; novos[inp.dataset.serv] = Math.round(v * 100) / 100; }
+    else { inp.style.borderColor = '#233F80'; novosPrecos[inp.dataset.serv] = Math.round(v * 100) / 100; }
   });
-  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Há valores inválidos. Use números maiores ou iguais a zero.'; return; }
+  document.querySelectorAll('#servicos-lista input[data-dur]').forEach(inp => {
+    const v = Number(inp.value);
+    if (inp.value === '' || isNaN(v) || v <= 0) { invalido = true; inp.style.borderColor = '#e05555'; }
+    else { inp.style.borderColor = '#233F80'; novasDuracoes[inp.dataset.dur] = Math.round(v); }
+  });
+  if (invalido) { st.style.color = '#e05555'; st.textContent = 'Há valores inválidos. Confira preços e durações.'; return; }
   btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
   try {
-    const lista = SERVICES.map(s => ({ id: s.id, name: s.name, price: novos[s.id] != null ? novos[s.id] : s.price }));
+    const lista = SERVICES.map(s => ({
+      id: s.id, name: s.name,
+      price: novosPrecos[s.id] != null ? novosPrecos[s.id] : s.price,
+      duracao: novasDuracoes[s.id] != null ? novasDuracoes[s.id] : s.duracao,
+    }));
     await db.collection('config').doc('servicos').set({
-      precos: novos,
+      precos: novosPrecos,
+      duracoes: novasDuracoes,
       lista,
       atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    SERVICES.forEach(s => { if (novos[s.id] != null) s.price = novos[s.id]; });
+    SERVICES.forEach(s => {
+      if (novosPrecos[s.id] != null) s.price = novosPrecos[s.id];
+      if (novasDuracoes[s.id] != null) s.duracao = novasDuracoes[s.id];
+    });
     renderServicosEditor();
     st.style.color = '#4caf50'; st.textContent = 'Valores salvos! Já valem para novos agendamentos.';
     showToast('Valores dos serviços atualizados.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+// ── Ajustes (identidade, letra e cores da barbearia) ──
+function escAj(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderAjustesForm() {
+  document.getElementById('aj-nome').value = BARBEARIA.nome || '';
+  document.getElementById('aj-whatsapp').value = BARBEARIA.whatsapp || '';
+  document.getElementById('aj-topo1').value = BARBEARIA.topoLinha1 || '';
+  document.getElementById('aj-topo2').value = BARBEARIA.topoLinha2 || '';
+  document.getElementById('aj-nomecurto').value = BARBEARIA.nomeCurto || '';
+  document.getElementById('aj-logo-preview').src = BARBEARIA.logoBase64 || BARBEARIA.logo;
+  renderLetraGrid();
+  renderCoresGrid();
+}
+
+let _ajLogoBase64Selecionada = undefined; // undefined = não mexeu; null = voltar ao padrão; string = nova logo
+
+function ajLogoSelecionada(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  const reader = new FileReader();
+  reader.onload = e => {
+    img.onload = () => {
+      // Reduz para no máximo 300px do lado maior, para caber bem no Firestore
+      const max = 300;
+      const escala = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/png');
+      _ajLogoBase64Selecionada = dataUrl;
+      document.getElementById('aj-logo-preview').src = dataUrl;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function ajUsarLogoPadrao() {
+  _ajLogoBase64Selecionada = null;
+  document.getElementById('aj-logo-preview').src = BARBEARIA_PADRAO.logo;
+}
+
+async function salvarDadosBarbearia() {
+  const st = document.getElementById('aj-dados-status');
+  const btn = document.getElementById('btn-salvar-aj-dados');
+  const dados = {
+    nome: document.getElementById('aj-nome').value.trim() || BARBEARIA_PADRAO.nome,
+    whatsapp: document.getElementById('aj-whatsapp').value.trim().replace(/\D/g, '') || BARBEARIA_PADRAO.whatsapp,
+    topoLinha1: document.getElementById('aj-topo1').value.trim() || BARBEARIA_PADRAO.topoLinha1,
+    topoLinha2: document.getElementById('aj-topo2').value.trim() || BARBEARIA_PADRAO.topoLinha2,
+    nomeCurto: document.getElementById('aj-nomecurto').value.trim() || BARBEARIA_PADRAO.nomeCurto,
+  };
+  if (_ajLogoBase64Selecionada !== undefined) dados.logoBase64 = _ajLogoBase64Selecionada;
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('barbearia').set(dados, { merge: true });
+    Object.assign(BARBEARIA, dados);
+    try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
+    aplicarBarbearia(BARBEARIA);
+    _ajLogoBase64Selecionada = undefined;
+    st.style.color = '#4caf50'; st.textContent = 'Dados salvos! Já valem no site e no painel.';
+    showToast('Dados da barbearia atualizados.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+function renderLetraGrid() {
+  const el = document.getElementById('aj-letra-grid');
+  if (!el) return;
+  const atual = BARBEARIA.letra || 'classico';
+  el.innerHTML = Object.keys(LETRA_ESTILOS).map(key => {
+    const estilo = LETRA_ESTILOS[key];
+    const ativo = key === atual;
+    return '<div data-letra="' + key + '" onclick="selecionarLetra(\'' + key + '\')" style="cursor:pointer;text-align:center;padding:16px 10px;border-radius:6px;background:#0A1330;border:1.5px solid ' + (ativo ? '#EBC531' : '#16295C') + ';">' +
+      '<div style="' + estilo.top + 'font-size:14px;color:#F1EAD6;text-transform:uppercase;line-height:1.3;">' + escAj(BARBEARIA.topoLinha1 || 'Nome') + '</div>' +
+      '<div style="' + estilo.bottom + 'font-size:20px;color:#EBC531;text-transform:uppercase;line-height:1.3;">' + escAj(BARBEARIA.topoLinha2 || 'Barber') + '</div>' +
+      '<div style="margin-top:8px;font-family:\'Oswald\',sans-serif;font-size:10px;letter-spacing:1.5px;color:' + (ativo ? '#EBC531' : '#5E6E9E') + ';text-transform:uppercase;">' + estilo.label + (ativo ? ' · em uso' : '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+let _ajLetraSelecionada = null;
+function selecionarLetra(key) {
+  _ajLetraSelecionada = key;
+  document.querySelectorAll('#aj-letra-grid [data-letra]').forEach(d => {
+    d.style.borderColor = d.dataset.letra === key ? '#EBC531' : '#16295C';
+  });
+}
+
+async function salvarLetra() {
+  const st = document.getElementById('aj-letra-status');
+  const btn = document.getElementById('btn-salvar-aj-letra');
+  const letra = _ajLetraSelecionada || BARBEARIA.letra || 'classico';
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('barbearia').set({ letra }, { merge: true });
+    BARBEARIA.letra = letra;
+    try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
+    aplicarLetra(BARBEARIA);
+    renderLetraGrid();
+    st.style.color = '#4caf50'; st.textContent = 'Letra salva!';
+    showToast('Estilo de letra atualizado.');
+  } catch (e) {
+    console.warn(e);
+    st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
+  } finally { btn.disabled = false; }
+}
+
+let _ajPaletaSelecionada = null;
+function renderCoresGrid() {
+  const el = document.getElementById('aj-cores-grid');
+  if (!el) return;
+  el.innerHTML = PALETAS_CORES.map(p => {
+    const ativo = BARBEARIA.corDestaque === p.destaque && BARBEARIA.corFundo === p.fundo;
+    return '<div data-paleta="' + p.id + '" onclick="selecionarPaleta(\'' + p.id + '\')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:6px;background:#0A1330;border:1.5px solid ' + (ativo ? '#EBC531' : '#16295C') + ';">' +
+      '<span style="width:16px;height:16px;border-radius:50%;background:' + p.fundo + ';border:1px solid #233F80;flex-shrink:0;"></span>' +
+      '<span style="width:16px;height:16px;border-radius:50%;background:' + p.destaque + ';flex-shrink:0;"></span>' +
+      '<span style="font-family:\'Oswald\',sans-serif;font-size:11px;letter-spacing:1px;color:#B4BEDC;text-transform:uppercase;">' + p.label + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function selecionarPaleta(id) {
+  _ajPaletaSelecionada = id;
+  document.querySelectorAll('#aj-cores-grid [data-paleta]').forEach(d => {
+    d.style.borderColor = d.dataset.paleta === id ? '#EBC531' : '#16295C';
+  });
+}
+
+async function salvarCores() {
+  const st = document.getElementById('aj-cores-status');
+  const btn = document.getElementById('btn-salvar-aj-cores');
+  const paleta = PALETAS_CORES.find(p => p.id === _ajPaletaSelecionada);
+  if (!paleta) { st.style.color = '#e05555'; st.textContent = 'Escolha uma paleta de cores.'; return; }
+  btn.disabled = true; st.style.color = '#94A4CC'; st.textContent = 'Salvando...';
+  try {
+    await db.collection('config').doc('barbearia').set({ corDestaque: paleta.destaque, corFundo: paleta.fundo }, { merge: true });
+    BARBEARIA.corDestaque = paleta.destaque;
+    BARBEARIA.corFundo = paleta.fundo;
+    try { localStorage.setItem('wb_barbearia_v1', JSON.stringify(BARBEARIA)); } catch (e) {}
+    aplicarTema(BARBEARIA);
+    renderCoresGrid();
+    st.style.color = '#4caf50'; st.textContent = 'Cores salvas!';
+    showToast('Cores do site atualizadas.');
   } catch (e) {
     console.warn(e);
     st.style.color = '#e05555'; st.textContent = 'Erro ao salvar: ' + (e.message || e.code || e);
@@ -253,12 +433,13 @@ function showTab(tab, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
   if (el) el.classList.add('active');
-  const titles = { dashboard: 'Dashboard', agendamentos: 'Agendamentos', horarios: 'Horarios de Atendimento', servicos: 'Valores dos Serviços', datas: 'Datas Especiais', clientes: 'Clientes' };
+  const titles = { dashboard: 'Dashboard', agendamentos: 'Agendamentos', horarios: 'Horarios de Atendimento', servicos: 'Valores dos Serviços', datas: 'Datas Especiais', clientes: 'Clientes', ajustes: 'Ajustes' };
   document.getElementById('page-title').textContent = titles[tab] || tab;
   if (tab === 'horarios') carregarHorarios();
   if (tab === 'servicos') renderServicosEditor();
   if (tab === 'datas') carregarDatasEspeciais();
   if (tab === 'clientes') renderClientes();
+  if (tab === 'ajustes') renderAjustesForm();
   gerenciarFab(tab);
   // Scroll para o topo no mobile
   window.scrollTo({ top: 0, behavior: 'smooth' });
