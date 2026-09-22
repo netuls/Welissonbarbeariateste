@@ -25,6 +25,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
+  <script src="config.js"></script>
   <style>
     #dash-filter-de::-webkit-calendar-picker-indicator,
     #dash-filter-ate::-webkit-calendar-picker-indicator { filter: invert(0.5) sepia(1) saturate(2) hue-rotate(5deg); cursor: pointer; }
@@ -123,7 +124,7 @@
   <!-- LOGIN -->
   <div id="login-screen" class="login-screen">
     <div class="login-card">
-      <img src="logo.png" alt="Wellisson Barber" class="login-logo"/>
+      <img src="logo.png" alt="Wellisson Barber" class="login-logo" data-logo/>
       <h2>Painel Administrativo</h2>
       <p>Entre com a senha do dono</p>
       <div class="form-group">
@@ -140,8 +141,8 @@
     <aside class="sidebar">
       <div class="sidebar-top">
         <div class="sidebar-brand">
-          <img src="logo_emblema.png" alt="" class="sidebar-logo"/>
-          <span class="sidebar-brand-text">Wellisson Barber</span>
+          <img src="logo_emblema.png" alt="" class="sidebar-logo" data-logo/>
+          <span class="sidebar-brand-text" id="admin-marca-nome">Wellisson Barber</span>
         </div>
       </div>
       <nav class="sidebar-nav">
@@ -162,6 +163,9 @@
         </a>
         <a href="#" class="nav-item" onclick="showTab('clientes', this)">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></span><span>Clientes</span>
+        </a>
+        <a href="#" class="nav-item" onclick="showTab('ajustes', this)">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span><span>Ajustes</span>
         </a>
       </nav>
       <div class="sidebar-bottom">
@@ -377,7 +381,7 @@
         <div style="max-width:720px;">
           <div style="margin-bottom:24px;">
             <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Valores dos Serviços</h3>
-            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Altere o preço de cada serviço. Ao salvar, o novo valor passa a valer no site para os próximos agendamentos e no atendimento avulso do painel. Agendamentos que já existem mantêm o valor de quando foram feitos.</p>
+            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;">Altere o preço e a duração de cada serviço. Ao salvar, os novos valores passam a valer no site para os próximos agendamentos e no atendimento avulso do painel. Agendamentos que já existem mantêm os valores de quando foram feitos.</p>
           </div>
           <div id="servicos-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;"></div>
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -479,6 +483,74 @@
             <p style="font-size:13px;color:#94A4CC;line-height:1.7;">As datas especiais têm <strong style="color:#F1EAD6;">prioridade total</strong> sobre a grade semanal. Se você marcar um feriado como <em>Fechado</em>, o cliente não verá horários naquele dia mesmo que seja um dia normalmente ativo. Se marcar como <em>Aberto</em>, o cliente verá os horários especiais que você definir.</p>
             <p style="font-size:12px;color:#7183B4;line-height:1.7;margin-top:10px;">Atenção: Se aparecer "Erro ao salvar", acesse o <strong style="color:#F1EAD6;">Firebase Console → Firestore → Regras</strong> e certifique-se que a coleção <code style="background:#0F1F45;padding:2px 6px;border-radius:3px;color:#B4BEDC;">config</code> tem permissão de escrita.</p>
           </div>
+        </div>
+      </div>
+
+      <!-- AJUSTES -->
+      <div class="tab-content" id="tab-ajustes">
+        <div style="max-width:760px;display:flex;flex-direction:column;gap:28px;">
+
+          <!-- Dados da Barbearia -->
+          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
+            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Dados da Barbearia</h3>
+            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Nome, logo e WhatsApp. As mudanças aparecem no site e no painel assim que você salvar.</p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Nome da Barbearia</span>
+                <input type="text" id="aj-nome" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;"/>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">WhatsApp (com DDD)</span>
+                <input type="tel" id="aj-whatsapp" placeholder="5585999999999" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:10px 14px;color:#F1EAD6;font-size:14px;outline:none;"/>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Topo do site · linha 1</span>
+                <input type="text" id="aj-topo1" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Topo do site · linha 2</span>
+                <input type="text" id="aj-topo2" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-family:'Oswald',sans-serif;font-size:9px;letter-spacing:1.5px;color:#5E6E9E;text-transform:uppercase;">Nome curto (app)</span>
+                <input type="text" id="aj-nomecurto" style="background:#122452;border:1px solid #233F80;border-radius:4px;padding:9px 12px;color:#F1EAD6;font-size:13px;outline:none;"/>
+              </div>
+            </div>
+
+            <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:#7183B4;text-transform:uppercase;">Logo</span>
+            <div style="display:flex;align-items:center;gap:14px;margin-top:8px;margin-bottom:8px;">
+              <img id="aj-logo-preview" src="logo_emblema.png" style="width:64px;height:64px;object-fit:contain;background:#0A1330;border:1px solid #16295C;border-radius:6px;padding:6px;"/>
+              <input type="file" id="aj-logo-file" accept="image/*" style="display:none;" onchange="ajLogoSelecionada(event)"/>
+              <button onclick="document.getElementById('aj-logo-file').click()" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:10px 18px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;">Escolher Imagem</button>
+              <button onclick="ajUsarLogoPadrao()" style="background:transparent;border:1px solid #233F80;color:#94A4CC;padding:10px 18px;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;border-radius:4px;">Usar a logo padrão</button>
+            </div>
+            <p style="font-size:12px;color:#5E6E9E;line-height:1.6;margin-bottom:18px;">Use uma imagem quadrada, de preferência PNG com fundo transparente. Ela aparece no topo do site e no painel.</p>
+
+            <button onclick="salvarDadosBarbearia()" id="btn-salvar-aj-dados" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Dados</button>
+            <span id="aj-dados-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
+          </div>
+
+          <!-- Letra do Nome no Topo -->
+          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
+            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Letra do Nome no Topo</h3>
+            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Escolha o estilo de letra do nome grande que aparece no início do site. Muda só a aparência: as palavras continuam sendo as de "Topo do site", em Dados da Barbearia.</p>
+            <div id="aj-letra-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px;"></div>
+            <button onclick="salvarLetra()" id="btn-salvar-aj-letra" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Letra</button>
+            <span id="aj-letra-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
+          </div>
+
+          <!-- Cores do Site -->
+          <div style="background:#0C1838;border:1px solid #16295C;border-radius:8px;padding:24px;">
+            <h3 style="font-family:'Oswald',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#F1EAD6;font-size:16px;margin-bottom:6px;">Cores do Site</h3>
+            <p style="color:#94A4CC;font-size:13px;font-family:'Roboto',sans-serif;line-height:1.6;margin-bottom:18px;">Escolha as duas cores principais: destaque e fundo. O sistema ajusta todos os tons sozinho, no site e no painel.</p>
+            <div id="aj-cores-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;"></div>
+            <button onclick="salvarCores()" id="btn-salvar-aj-cores" style="background:#1B3168;border:1px solid #2C4E9E;color:#F1EAD6;padding:14px 32px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:4px;font-weight:700;">Salvar Cores</button>
+            <span id="aj-cores-status" style="margin-left:12px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#94A4CC;"></span>
+          </div>
+
         </div>
       </div>
 
@@ -930,6 +1002,9 @@
     </a>
     <a class="bottom-nav-item" id="bnav-clientes" onclick="showTab('clientes', this); syncBottomNav('bnav-clientes')">
       <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></span>Clientes
+    </a>
+    <a class="bottom-nav-item" id="bnav-ajustes" onclick="showTab('ajustes', this); syncBottomNav('bnav-ajustes')">
+      <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>Ajustes
     </a>
     <a class="bottom-nav-item" id="bnav-sair" onclick="doLogout()">
       <span class="bnav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></span>Sair
