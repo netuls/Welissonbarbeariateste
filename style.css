@@ -178,7 +178,7 @@ input, select, textarea {
     radial-gradient(ellipse at 50% 32%, rgba(58,96,190,0.30) 0%, transparent 62%),
     repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 28px),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 84px),
-    linear-gradient(180deg, #0C1A44 0%, #070E24 100%);
+    linear-gradient(180deg, var(--dark4) 0%, var(--black) 100%);
   z-index: 0;
 }
 
@@ -341,7 +341,11 @@ input, select, textarea {
 
 /* ================== SERVICES ================== */
 .services-section {
-  background: var(--dark);
+  /* Brilho radial sutil (mesma ideia do herói), usando as próprias cores do tema —
+     acompanha automaticamente qualquer paleta escolhida em Ajustes. */
+  background:
+    radial-gradient(ellipse at 50% -15%, var(--dark4) 0%, transparent 60%),
+    var(--dark);
   max-width: 100%;
   padding: 100px 60px;
   border-top: 1px solid rgba(255,255,255,0.04);
@@ -407,7 +411,12 @@ input, select, textarea {
 
 /* ================== PLANS ================== */
 .plans-section {
-  background: var(--black);
+  /* Antes era um "var(--black)" liso — ficava sem vida perto do herói.
+     Agora tem o mesmo tipo de brilho radial do topo, só que mais suave. */
+  background:
+    radial-gradient(ellipse at 50% -15%, var(--dark4) 0%, transparent 58%),
+    radial-gradient(ellipse at 50% 115%, var(--dark3) 0%, transparent 55%),
+    var(--black);
   max-width: 100%;
   padding: 100px 60px;
 }
@@ -538,7 +547,10 @@ input, select, textarea {
 
 /* ================== BOOKING ================== */
 .booking-section {
-  background: var(--dark);
+  /* Mesmo tratamento das outras seções, pra não voltar a ficar "morto" aqui embaixo */
+  background:
+    radial-gradient(ellipse at 50% -15%, var(--dark4) 0%, transparent 60%),
+    var(--dark);
   max-width: 100%;
   padding: 100px 60px;
   border-top: 1px solid rgba(255,255,255,0.04);
@@ -1063,7 +1075,7 @@ input, select, textarea {
   background-size: contain;
   background-position: center center;
   background-repeat: no-repeat;
-  background-color: #070E24;
+  background-color: var(--black);
 }
 
 /* Setas */
