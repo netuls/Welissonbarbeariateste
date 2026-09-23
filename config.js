@@ -69,12 +69,13 @@ const LETRA_ESTILOS = {
 
 // ─── Paletas de cores prontas ───────────────────────
 const PALETAS_CORES = [
-  { id: 'azul_dourado',   label: 'Azul e Dourado',    destaque: '#EBC531', fundo: '#0B1B3D' },
-  { id: 'preto_dourado',  label: 'Preto e Dourado',   destaque: '#EBC531', fundo: '#0A0A0A' },
-  { id: 'verde_dourado',  label: 'Verde e Dourado',   destaque: '#EBC531', fundo: '#07201A' },
-  { id: 'vinho_dourado',  label: 'Vinho e Dourado',   destaque: '#EBC531', fundo: '#2B0A12' },
-  { id: 'preto_vermelho', label: 'Preto e Vermelho',  destaque: '#E24545', fundo: '#0A0A0A' },
-  { id: 'grafite_laranja',label: 'Grafite e Laranja', destaque: '#F2994A', fundo: '#1C1C1C' },
+  { id: 'azul_dourado',      label: 'Azul e Dourado',      destaque: '#EBC531', fundo: '#0B1B3D' },
+  { id: 'azul_vivo_dourado', label: 'Azul Vivo e Dourado', destaque: '#EBC531', fundo: '#10204D' },
+  { id: 'preto_dourado',     label: 'Preto e Dourado',     destaque: '#EBC531', fundo: '#0A0A0A' },
+  { id: 'verde_dourado',     label: 'Verde e Dourado',     destaque: '#EBC531', fundo: '#07201A' },
+  { id: 'vinho_dourado',     label: 'Vinho e Dourado',     destaque: '#EBC531', fundo: '#2B0A12' },
+  { id: 'preto_vermelho',    label: 'Preto e Vermelho',    destaque: '#E24545', fundo: '#0A0A0A' },
+  { id: 'grafite_laranja',   label: 'Grafite e Laranja',   destaque: '#F2994A', fundo: '#1C1C1C' },
 ];
 
 // ─── Utilitários de cor ─────────────────────────────
